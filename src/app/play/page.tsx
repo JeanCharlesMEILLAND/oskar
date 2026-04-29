@@ -371,7 +371,7 @@ function ModeCardButton({
       onClick={onClick}
       className={`group relative rounded-3xl bg-gradient-to-br ${gradient} border border-emerald-100/40 p-5 sm:p-6 transition hover:-translate-y-1 hover:shadow-2xl hover:ring-4 ${ring} text-left w-full`}
     >
-      <div className="flex justify-center mb-3 sm:mb-4 transition-transform group-hover:scale-105">
+      <div className="flex items-center justify-center h-28 sm:h-36 mb-3 sm:mb-4 transition-transform group-hover:scale-105">
         {icon}
       </div>
       <h3 className="font-[var(--font-fraunces)] text-xl sm:text-2xl font-semibold text-emerald-950 text-center">

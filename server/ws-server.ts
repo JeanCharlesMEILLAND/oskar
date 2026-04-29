@@ -40,14 +40,89 @@ type ClientMsg =
   | { type: "auth"; name: string }
   | { type: "history"; with: string }
   | { type: "send"; to: string; text: string }
-  | { type: "ping" };
+  | { type: "ping" }
+  // Game rooms
+  | { type: "room_create" }
+  | { type: "room_join"; code: string }
+  | { type: "room_leave" }
+  | { type: "room_broadcast"; payload: unknown }; // forwarded to other players in room
+
 type ServerMsg =
   | { type: "ready"; name: string }
   | { type: "history"; with: string; messages: WireMessage[] }
   | { type: "msg"; from: string; to: string; text: string; ts: number }
   | { type: "error"; reason: string }
-  | { type: "pong" };
+  | { type: "pong" }
+  // Game rooms
+  | { type: "room_created"; code: string }
+  | { type: "room_joined"; code: string; isHost: boolean; players: string[] }
+  | { type: "room_left" }
+  | { type: "room_player_joined"; name: string; players: string[] }
+  | { type: "room_player_left"; name: string; players: string[]; newHost?: string }
+  | { type: "room_message"; from: string; payload: unknown };
+
 type WireMessage = { from: string; text: string; ts: number };
+
+// Room state
+type Room = {
+  code: string;
+  hostNameLower: string;
+  players: Map<string, WebSocket>; // nameLower → socket (one per name; multi-tab uses last connection)
+  playerNames: Map<string, string>; // nameLower → original casing
+  createdAt: number;
+};
+const rooms = new Map<string, Room>();
+// Reverse lookup: which room is each connection in
+const wsToRoom = new WeakMap<WebSocket, { code: string; nameLower: string }>();
+
+const ROOM_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no I/O/0/1
+function generateRoomCode(): string {
+  let code = "";
+  for (let i = 0; i < 4; i++) code += ROOM_CODE_ALPHABET[Math.floor(Math.random() * ROOM_CODE_ALPHABET.length)];
+  return code;
+}
+
+function getPlayersList(room: Room): string[] {
+  return Array.from(room.playerNames.values());
+}
+
+function broadcastToRoom(room: Room, msg: ServerMsg, exceptNameLower?: string) {
+  const json = JSON.stringify(msg);
+  for (const [nameLower, ws] of room.players) {
+    if (nameLower === exceptNameLower) continue;
+    if (ws.readyState === WebSocket.OPEN) ws.send(json);
+  }
+}
+
+function leaveRoom(ws: WebSocket) {
+  const info = wsToRoom.get(ws);
+  if (!info) return;
+  wsToRoom.delete(ws);
+  const room = rooms.get(info.code);
+  if (!room) return;
+  room.players.delete(info.nameLower);
+  const leaverName = room.playerNames.get(info.nameLower) ?? info.nameLower;
+  room.playerNames.delete(info.nameLower);
+  if (room.players.size === 0) {
+    rooms.delete(room.code);
+    return;
+  }
+  // If the host left, promote first remaining player
+  let newHost: string | undefined;
+  if (room.hostNameLower === info.nameLower) {
+    const next = room.players.keys().next().value as string | undefined;
+    if (next) {
+      room.hostNameLower = next;
+      newHost = room.playerNames.get(next);
+    }
+  }
+  broadcastToRoom(room, {
+    type: "room_player_left",
+    name: leaverName,
+    players: getPlayersList(room),
+    newHost,
+  });
+}
 
 // userNameLower → set of active WebSockets for that user
 const connections = new Map<string, Set<WebSocket>>();
@@ -151,6 +226,73 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       return;
     }
 
+    if (msg.type === "room_create") {
+      // Leave previous room if any
+      leaveRoom(ws);
+      let code = generateRoomCode();
+      // Avoid collision (extremely rare)
+      while (rooms.has(code)) code = generateRoomCode();
+      const room: Room = {
+        code,
+        hostNameLower: myNameLower,
+        players: new Map([[myNameLower, ws]]),
+        playerNames: new Map([[myNameLower, myName!]]),
+        createdAt: Date.now(),
+      };
+      rooms.set(code, room);
+      wsToRoom.set(ws, { code, nameLower: myNameLower });
+      send({ type: "room_created", code });
+      send({ type: "room_joined", code, isHost: true, players: getPlayersList(room) });
+      return;
+    }
+
+    if (msg.type === "room_join") {
+      const code = msg.code?.trim().toUpperCase();
+      if (!code) return fail("bad_code");
+      const room = rooms.get(code);
+      if (!room) return fail("room_not_found");
+      if (room.players.size >= 4) return fail("room_full");
+      // Leave previous room
+      leaveRoom(ws);
+      // Replace any existing socket for the same user
+      const existing = room.players.get(myNameLower);
+      if (existing && existing !== ws) {
+        try { existing.close(1000, "replaced by new connection"); } catch {}
+      }
+      room.players.set(myNameLower, ws);
+      room.playerNames.set(myNameLower, myName!);
+      wsToRoom.set(ws, { code, nameLower: myNameLower });
+      const isHost = room.hostNameLower === myNameLower;
+      send({ type: "room_joined", code, isHost, players: getPlayersList(room) });
+      // Notify other players
+      broadcastToRoom(
+        room,
+        { type: "room_player_joined", name: myName!, players: getPlayersList(room) },
+        myNameLower,
+      );
+      return;
+    }
+
+    if (msg.type === "room_leave") {
+      leaveRoom(ws);
+      send({ type: "room_left" });
+      return;
+    }
+
+    if (msg.type === "room_broadcast") {
+      const info = wsToRoom.get(ws);
+      if (!info) return fail("not_in_room");
+      const room = rooms.get(info.code);
+      if (!room) return fail("room_gone");
+      // Forward to other players in the room
+      broadcastToRoom(
+        room,
+        { type: "room_message", from: myName!, payload: msg.payload },
+        myNameLower,
+      );
+      return;
+    }
+
     fail("unknown_type");
   });
 
@@ -160,6 +302,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       set?.delete(ws);
       if (set && set.size === 0) connections.delete(myNameLower);
     }
+    leaveRoom(ws);
     console.log(`[ws] disconnect ip=${ip} name=${myName ?? "?"}`);
   });
 
