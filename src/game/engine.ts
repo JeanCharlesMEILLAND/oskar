@@ -68,6 +68,11 @@ export function createState(
       comboTimer: 0,
       invulnUntil: 0,
       magnetUntil: 0,
+      maxCombo: 0,
+      goldEaten: 0,
+      powerupsPicked: 0,
+      combo3Count: 0,
+      gotHit: false,
     },
   ];
   if (mode === "duo") {
@@ -85,6 +90,11 @@ export function createState(
       comboTimer: 0,
       invulnUntil: 0,
       magnetUntil: 0,
+      maxCombo: 0,
+      goldEaten: 0,
+      powerupsPicked: 0,
+      combo3Count: 0,
+      gotHit: false,
     });
   }
 
@@ -303,15 +313,17 @@ function handleCollisions(state: GameState) {
         t.score += Math.round(base * mult * classPoints * comboMult);
         t.combo++;
         t.comboTimer = 0;
+        if (t.combo > t.maxCombo) t.maxCombo = t.combo;
+        if (l.isGold) t.goldEaten++;
+        // combo3Count: fire on each new combo3+ chain (i.e. each time we cross threshold)
+        if (t.combo === COMBO_THRESHOLD_2X) t.combo3Count++;
         spawnEatParticles(state, l.pos, l.isGold);
         state.events.push({ type: "eat", combo: t.combo, isGold: l.isGold });
         if (t.combo === COMBO_THRESHOLD_2X || t.combo === COMBO_THRESHOLD_3X) {
           state.events.push({ type: "combo" });
         }
         state.lettuces.splice(i, 1);
-
         // Reaching SOLO_TARGET doesn't end the round — keep playing for high score.
-        // Game ends only when timer expires (solo/duo) or all turtles die.
       }
     }
 
@@ -320,6 +332,7 @@ function handleCollisions(state: GameState) {
       const p = state.powerups[i];
       if (dist2(t.pos, p.pos) < (TURTLE_RADIUS + POWERUP_RADIUS_PICK) ** 2) {
         applyPowerUp(state, t, p);
+        t.powerupsPicked++;
         state.events.push({ type: "powerup", kind: p.kind });
         state.powerups.splice(i, 1);
       }
@@ -347,6 +360,7 @@ function handleCollisions(state: GameState) {
           }
           // Damage
           t.lives--;
+          t.gotHit = true;
           t.invulnUntil = state.tick + Math.floor(HIT_INVULN_SEC * TICK_RATE);
           t.combo = 0;
           spawnHitParticles(state, t.pos);
@@ -408,7 +422,20 @@ function endGame(state: GameState, timeOut: boolean) {
   if (state.mode === "solo") won = score >= SOLO_TARGET;
   else if (state.mode === "duo") won = !timeOut;
   else won = false;
-  state.result = { score, survivedSec, won, lettuces: score };
+  // Aggregate per-round counters from the leading turtle
+  const lead = state.turtles.reduce((a, b) => (a.score >= b.score ? a : b));
+  state.result = {
+    score,
+    survivedSec,
+    won,
+    lettuces: score,
+    maxCombo: lead.maxCombo,
+    goldEaten: lead.goldEaten,
+    powerupsPicked: lead.powerupsPicked,
+    combo3Count: lead.combo3Count,
+    gotHit: lead.gotHit,
+    durationSec: state.tick / TICK_RATE,
+  };
   state.events.push({ type: won ? "win" : "lose" });
 }
 

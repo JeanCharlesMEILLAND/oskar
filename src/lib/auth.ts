@@ -215,6 +215,13 @@ export type GameResult = {
   score: number;
   survivedSec?: number;
   won: boolean;
+  // Per-round counters used by achievements + daily
+  maxCombo?: number;
+  goldEaten?: number;
+  powerupsPicked?: number;
+  combo3Count?: number;
+  gotHit?: boolean;
+  durationSec?: number;
 };
 
 export type ShopResult = { ok: true; account: Account } | { ok: false; reason: "noSession" | "alreadyOwned" | "notEnough" | "unknown" };
@@ -247,14 +254,23 @@ export function selectClass(id: string): ShopResult {
   return { ok: true, account: a };
 }
 
-export function saveGameResult(mode: "solo" | "duo" | "endless", result: GameResult) {
-  if (typeof window === "undefined") return;
+export type SaveOutcome = {
+  newAchievements: string[];
+  dailyJustCompleted: boolean;
+};
+
+export function saveGameResult(
+  mode: "solo" | "duo" | "endless",
+  result: GameResult,
+): SaveOutcome {
+  const out: SaveOutcome = { newAchievements: [], dailyJustCompleted: false };
+  if (typeof window === "undefined") return out;
   const session = readSession();
-  if (!session.name) return;
+  if (!session.name) return out;
   const accounts = readAccounts();
   const key = session.name.toLowerCase();
   const a = accounts[key];
-  if (!a) return;
+  if (!a) return out;
 
   if (mode === "solo") a.soloBest = Math.max(a.soloBest, result.score);
   else if (mode === "duo") a.duoBest = Math.max(a.duoBest, result.score);
@@ -269,6 +285,33 @@ export function saveGameResult(mode: "solo" | "duo" | "endless", result: GameRes
   // Stats
   if (!a.stats) a.stats = { powerups: 0, gold: 0, wins: 0 };
   if (result.won) a.stats.wins = (a.stats.wins ?? 0) + 1;
+  a.stats.powerups = (a.stats.powerups ?? 0) + (result.powerupsPicked ?? 0);
+  a.stats.gold = (a.stats.gold ?? 0) + (result.goldEaten ?? 0);
+
+  // Daily challenge progress
+  // Imported lazily to avoid circular deps with this module.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { updateDaily } = require("./daily") as typeof import("./daily");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { checkAchievements } = require("./achievements") as typeof import("./achievements");
+  const dailyOut = updateDaily(a, mode, result);
+  out.dailyJustCompleted = dailyOut.justCompleted;
+  out.newAchievements = checkAchievements(a, { mode, result });
 
   writeAccounts(accounts);
+  return out;
+}
+
+export function checkAchievementsAfterShop(): string[] {
+  if (typeof window === "undefined") return [];
+  const session = readSession();
+  if (!session.name) return [];
+  const accounts = readAccounts();
+  const a = accounts[session.name.toLowerCase()];
+  if (!a) return [];
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { checkAchievements } = require("./achievements") as typeof import("./achievements");
+  const newly = checkAchievements(a, {});
+  if (newly.length > 0) writeAccounts(accounts);
+  return newly;
 }

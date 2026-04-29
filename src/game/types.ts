@@ -20,6 +20,12 @@ export type Turtle = {
   comboTimer: number; // seconds since last eat
   invulnUntil: number; // tick number
   magnetUntil: number; // tick number
+  // Per-round counters (used to compute achievements / daily progress on game end)
+  maxCombo: number;
+  goldEaten: number;
+  powerupsPicked: number;
+  combo3Count: number; // how many times combo crossed x3 this round
+  gotHit: boolean;
 };
 
 export type Lettuce = {
@@ -72,7 +78,19 @@ export type GameState = {
   particles: Particle[];
   timeLeftSec: number;
   ended: boolean;
-  result: null | { score: number; survivedSec?: number; won: boolean; lettuces: number };
+  result: null | {
+    score: number;
+    survivedSec?: number;
+    won: boolean;
+    lettuces: number;
+    // Per-round stats — used by lib/auth to update achievements + daily
+    maxCombo: number;
+    goldEaten: number;
+    powerupsPicked: number;
+    combo3Count: number;
+    gotHit: boolean;
+    durationSec: number;
+  };
   nextLettuceId: number;
   nextRockId: number;
   nextPowerUpId: number;

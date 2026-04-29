@@ -21,6 +21,7 @@ import {
   type Account,
 } from "@/lib/auth";
 import { TURTLES_BY_ID } from "@/data/turtles";
+import { getTodaysChallenge, todayKey } from "@/data/daily";
 
 const TOTAL_CLASSES = 34;
 const TOTAL_MEDALS = 16;
@@ -219,7 +220,7 @@ export default function LobbyPage() {
         <div className="mt-10 grid grid-cols-2 sm:grid-cols-4 gap-3">
           <QuickLink href="/shop" emoji="🛒" label={t("lobby.shop")} />
           <QuickLink href="/shop" emoji="💎" label={t("lobby.limited")} />
-          <QuickLink href="/play/game?mode=solo" emoji="🏅" label={t("lobby.achievements")} />
+          <QuickLink href="/achievements" emoji="🏅" label={t("lobby.achievements")} />
           <QuickLink href="/play/game?mode=solo" emoji="👤" label={t("lobby.profile")} />
         </div>
 
@@ -332,19 +333,14 @@ function QuickLink({ href, emoji, label }: { href: string; emoji: string; label:
   );
 }
 
-function DailyChallenge({
-  daily,
-}: {
-  daily: Account["daily"];
-}) {
+function DailyChallenge({ daily }: { daily: Account["daily"] }) {
   const { t, lang } = useT();
-  const today = new Date().toISOString().slice(0, 10);
-  const isToday = daily.day === today;
-  const target = 2; // We don't have the challenge map here; use a placeholder
-  const progress = isToday ? Math.min(daily.progress, target) : 0;
-  const done = daily.claimed;
-  const challengeText =
-    lang === "pl" ? "Dzisiejsze wyzwanie czeka w grze!" : "Le défi du jour t'attend dans le jeu !";
+  const todayCh = getTodaysChallenge();
+  const today = todayKey();
+  const isToday = daily?.day === today;
+  const progress = isToday ? Math.min(daily.progress, todayCh.target) : 0;
+  const done = isToday && daily.claimed;
+  const targetMode = todayCh.type === "endless_sec" ? "endless" : "solo";
 
   return (
     <div className="rounded-3xl border-2 border-amber-200 bg-gradient-to-br from-amber-50 via-yellow-50 to-lime-50 p-5 md:p-6 flex flex-col md:flex-row gap-4 md:items-center">
@@ -353,24 +349,25 @@ function DailyChallenge({
           {t("lobby.daily")}
         </p>
         <p className="text-sm text-emerald-900/70 mt-1">
-          {done ? t("lobby.dailyDone") : challengeText}
+          {done ? t("lobby.dailyDone") : todayCh.names[lang]}
         </p>
-        {isToday && !done && (
+        {!done && (
           <div className="mt-3 max-w-xs">
             <div className="h-2 bg-white/60 rounded-full overflow-hidden">
               <div
                 className="h-full bg-gradient-to-r from-amber-400 to-emerald-500 transition-all"
-                style={{ width: `${(progress / target) * 100}%` }}
+                style={{ width: `${(progress / todayCh.target) * 100}%` }}
               />
             </div>
             <p className="text-xs text-emerald-900/55 mt-1">
-              {progress}/{target}
+              {progress}/{todayCh.target}
+              {!done && (lang === "pl" ? " · nagroda 100 🥬" : " · récompense 100 🥬")}
             </p>
           </div>
         )}
       </div>
       <Link
-        href="/play/game?mode=solo"
+        href={`/play/game?mode=${targetMode}`}
         className="shrink-0 rounded-full bg-emerald-700 px-5 py-2.5 text-sm font-medium text-white shadow-md hover:bg-emerald-800 transition text-center"
       >
         {done ? "✓" : "Graj →"}

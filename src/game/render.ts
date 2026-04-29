@@ -408,47 +408,31 @@ function drawRock(ctx: CanvasRenderingContext2D, r: Rock) {
 
 function drawLettuce(ctx: CanvasRenderingContext2D, l: Lettuce) {
   ctx.save();
-  const bobY = Math.sin(l.bobPhase) * 2;
+  const bobY = Math.sin(l.bobPhase) * 2.5;
+  const scale = 1 + Math.sin(l.bobPhase * 1.3) * 0.05;
   ctx.translate(l.pos.x, l.pos.y + bobY);
-  // Shadow
-  ctx.fillStyle = "rgba(0,0,0,0.2)";
+  // Shadow under
+  ctx.fillStyle = "rgba(0,0,0,0.22)";
   ctx.beginPath();
-  ctx.ellipse(0, 12, 12, 3, 0, 0, Math.PI * 2);
+  ctx.ellipse(0, 14, 14 * scale, 4, 0, 0, Math.PI * 2);
   ctx.fill();
-  // Layered leaves
+  // Soft glow halo for gold
   if (l.isGold) {
-    ctx.fillStyle = "#fbbf24";
-    drawLettuceShape(ctx, 14);
-    ctx.fillStyle = "#fde047";
-    drawLettuceShape(ctx, 11);
-    ctx.fillStyle = "#fef9c3";
-    drawLettuceShape(ctx, 7);
-    // Sparkle
-    ctx.fillStyle = "white";
+    const halo = ctx.createRadialGradient(0, 0, 4, 0, 0, 26);
+    halo.addColorStop(0, "rgba(253, 224, 71, 0.7)");
+    halo.addColorStop(1, "rgba(253, 224, 71, 0)");
+    ctx.fillStyle = halo;
     ctx.beginPath();
-    ctx.arc(-3, -3, 2, 0, Math.PI * 2);
+    ctx.arc(0, 0, 26, 0, Math.PI * 2);
     ctx.fill();
-  } else {
-    ctx.fillStyle = "#15803d";
-    drawLettuceShape(ctx, 14);
-    ctx.fillStyle = "#22c55e";
-    drawLettuceShape(ctx, 11);
-    ctx.fillStyle = "#86efac";
-    drawLettuceShape(ctx, 7);
   }
-  // Outline
-  ctx.strokeStyle = "rgba(255,255,255,0.6)";
-  ctx.lineWidth = 1.2;
-  ctx.beginPath();
-  ctx.arc(0, 0, 14, 0, Math.PI * 2);
-  ctx.stroke();
+  // Salade emoji
+  ctx.scale(scale, scale);
+  ctx.font = "30px system-ui, 'Apple Color Emoji', 'Segoe UI Emoji'";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(l.isGold ? "🌟" : "🥬", 0, 0);
   ctx.restore();
-}
-
-function drawLettuceShape(ctx: CanvasRenderingContext2D, r: number) {
-  ctx.beginPath();
-  ctx.arc(0, 0, r, 0, Math.PI * 2);
-  ctx.fill();
 }
 
 function drawTurtle(ctx: CanvasRenderingContext2D, t: Turtle, tick: number) {
