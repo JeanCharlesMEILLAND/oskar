@@ -816,7 +816,7 @@ function CodePrompt({
             setFeedback(null);
           }}
           autoFocus
-          placeholder="OSKAR1000"
+          placeholder={lang === "pl" ? "wpisz kod..." : "tape ton code..."}
           maxLength={20}
           className={`w-full rounded-2xl border-2 px-4 py-3 text-center text-xl font-mono tracking-wider outline-none transition ${
             feedback?.type === "err"
