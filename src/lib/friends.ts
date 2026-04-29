@@ -37,34 +37,45 @@ function readSessionName(): string {
   }
 }
 
-/** Send a friend request from current user to `targetName`. */
+/**
+ * Add a friend by name. Behavior:
+ * - If the target account exists in this browser → both become friends immediately (no handshake).
+ * - If not → only add to my list (the other side will pair up if they ever register on this device).
+ *
+ * This pragmatic approach "just works" for kids testing the chat. When the WebSocket server is
+ * online, this will be replaced with proper request/accept across devices.
+ */
 export function sendFriendRequest(targetName: string): FriendOpResult {
   if (typeof window === "undefined") return { ok: false, reason: "noSession" };
   const myName = readSessionName();
   if (!myName) return { ok: false, reason: "noSession" };
-  if (!targetName.trim()) return { ok: false, reason: "empty" };
+  const trimmedTarget = targetName.trim();
+  if (!trimmedTarget) return { ok: false, reason: "empty" };
 
   const accounts = readAccounts();
   const myKey = myName.toLowerCase();
-  const tgtKey = targetName.trim().toLowerCase();
+  const tgtKey = trimmedTarget.toLowerCase();
   const me = accounts[myKey];
   const tgt = accounts[tgtKey];
   if (!me) return { ok: false, reason: "noSession" };
   if (myKey === tgtKey) return { ok: false, reason: "self" };
-  if (!tgt) return { ok: false, reason: "notFound" };
 
   if (!me.friends) me.friends = [];
-  if (!me.friendRequests) me.friendRequests = [];
-  if (!tgt.friendRequests) tgt.friendRequests = [];
-
   if (me.friends.some((n) => n.toLowerCase() === tgtKey)) {
     return { ok: false, reason: "alreadyFriend" };
   }
-  if (tgt.friendRequests.some((n) => n.toLowerCase() === myKey)) {
-    return { ok: false, reason: "alreadyRequested" };
+
+  // Add to my friends list (preserve casing — use target's stored name if it exists)
+  me.friends.push(tgt ? tgt.name : trimmedTarget);
+
+  // If the other account exists on this device, mirror the friendship (instant pair)
+  if (tgt) {
+    if (!tgt.friends) tgt.friends = [];
+    if (!tgt.friends.some((n) => n.toLowerCase() === myKey)) {
+      tgt.friends.push(me.name);
+    }
   }
-  // Add my name to target's incoming requests (preserve original casing)
-  tgt.friendRequests.push(me.name);
+
   writeAccounts(accounts);
   return { ok: true, account: me };
 }
