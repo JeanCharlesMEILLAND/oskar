@@ -20,6 +20,7 @@ import {
   isAdmin,
   logout as authLogout,
   tryBecomeAdmin,
+  tryRedeemCode,
   type Account,
 } from "@/lib/auth";
 import { TURTLES_BY_ID } from "@/data/turtles";
@@ -46,6 +47,7 @@ export default function LobbyPage() {
   const [showAdminPrompt, setShowAdminPrompt] = useState(false);
   const [showDuoPicker, setShowDuoPicker] = useState(false);
   const [showMultiplayer, setShowMultiplayer] = useState(false);
+  const [showCode, setShowCode] = useState(false);
 
   useEffect(() => {
     const a = getCurrentAccount();
@@ -99,6 +101,12 @@ export default function LobbyPage() {
         </Link>
         <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
           <LanguageSwitch />
+          <button
+            onClick={() => setShowCode(true)}
+            className="inline-flex items-center gap-1 rounded-full border border-pink-200 bg-pink-50/70 px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium text-pink-900 backdrop-blur hover:bg-pink-50 transition whitespace-nowrap"
+          >
+            🎁 {lang === "pl" ? "Kod" : "Code"}
+          </button>
           <button
             onClick={handleSave}
             className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-white/70 px-4 py-2 text-sm font-medium text-emerald-900 backdrop-blur hover:bg-white transition"
@@ -226,6 +234,16 @@ export default function LobbyPage() {
             onSuccess={() => {
               setShowAdminPrompt(false);
               setAdmin(isAdmin());
+            }}
+          />
+        )}
+
+        {showCode && (
+          <CodePrompt
+            onClose={() => setShowCode(false)}
+            onSuccess={() => {
+              const fresh = getCurrentAccount();
+              if (fresh) setAccount(fresh);
             }}
           />
         )}
@@ -726,6 +744,114 @@ function DuoFriendPicker({
           {lang === "pl" ? "Graj bez znajomego (klasa Normalny)" : "Sans ami (classe Normale)"}
         </button>
       </div>
+    </div>
+  );
+}
+
+function CodePrompt({
+  onClose,
+  onSuccess,
+}: {
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const { lang } = useT();
+  const [code, setCode] = useState("");
+  const [feedback, setFeedback] = useState<{ type: "ok" | "err"; msg: string } | null>(null);
+
+  const submit = () => {
+    const result = tryRedeemCode(code);
+    if (result.ok) {
+      setFeedback({ type: "ok", msg: "✓ " + result.reward.label[lang] });
+      setCode("");
+      onSuccess();
+      setTimeout(onClose, 1200);
+    } else {
+      const msg =
+        result.reason === "already"
+          ? lang === "pl"
+            ? "Już użyte"
+            : "Déjà utilisé"
+          : result.reason === "noSession"
+            ? lang === "pl"
+              ? "Zaloguj się"
+              : "Connecte-toi"
+            : lang === "pl"
+              ? "Zły kod"
+              : "Code invalide";
+      setFeedback({ type: "err", msg });
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-emerald-950/60 backdrop-blur-sm p-4">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          submit();
+        }}
+        className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl"
+      >
+        <div className="flex items-start justify-between mb-3">
+          <p className="font-[var(--font-fraunces)] text-2xl font-semibold text-emerald-950">
+            🎁 {lang === "pl" ? "Kod bonusowy" : "Code bonus"}
+          </p>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full bg-zinc-100 hover:bg-zinc-200 transition w-9 h-9 flex items-center justify-center text-zinc-700"
+          >
+            ✗
+          </button>
+        </div>
+        <p className="text-sm text-emerald-900/70 mb-4">
+          {lang === "pl"
+            ? "Wpisz kod od znajomego, żeby odblokować bonus :"
+            : "Entre un code reçu d'un ami pour débloquer un bonus :"}
+        </p>
+        <input
+          value={code}
+          onChange={(e) => {
+            setCode(e.target.value.toUpperCase());
+            setFeedback(null);
+          }}
+          autoFocus
+          placeholder="OSKAR1000"
+          maxLength={20}
+          className={`w-full rounded-2xl border-2 px-4 py-3 text-center text-xl font-mono tracking-wider outline-none transition ${
+            feedback?.type === "err"
+              ? "border-rose-400 bg-rose-50"
+              : feedback?.type === "ok"
+                ? "border-emerald-400 bg-emerald-50"
+                : "border-emerald-100 bg-white focus:border-emerald-500"
+          }`}
+        />
+        {feedback && (
+          <p
+            className={`mt-3 text-sm text-center ${
+              feedback.type === "ok" ? "text-emerald-700 font-medium" : "text-rose-600"
+            }`}
+          >
+            {feedback.msg}
+          </p>
+        )}
+        <div className="mt-5 flex gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 rounded-full border border-zinc-300 px-4 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 transition"
+          >
+            {lang === "pl" ? "Zamknij" : "Fermer"}
+          </button>
+          <button
+            type="submit"
+            disabled={!code.trim()}
+            className="flex-1 rounded-full bg-emerald-700 text-white px-4 py-2.5 text-sm font-medium hover:bg-emerald-800 disabled:opacity-40 transition"
+          >
+            {lang === "pl" ? "Aktywuj" : "Activer"}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }

@@ -3,6 +3,7 @@
 
 import { updateDaily } from "./daily";
 import { checkAchievements } from "./achievements";
+import { CODES, type CodeReward } from "@/data/codes";
 
 const SESSION_KEY = "zolwie:zolwiki_session_v4";
 const ACCOUNTS_KEY = "zolwie:zolwiki_accounts_v4";
@@ -25,6 +26,7 @@ export type Account = {
   avatar: string;
   friends: string[];
   friendRequests: string[];
+  redeemed?: Record<string, true>;
 };
 
 export type Session = {
@@ -228,6 +230,38 @@ export function tryBecomeAdmin(code: string): boolean {
 export function isAdmin(): boolean {
   if (typeof window === "undefined") return false;
   return !!readSession().isAdmin;
+}
+
+export type RedeemResult =
+  | { ok: true; reward: CodeReward }
+  | { ok: false; reason: "noSession" | "unknown" | "already" };
+
+export function tryRedeemCode(rawCode: string): RedeemResult {
+  if (typeof window === "undefined") return { ok: false, reason: "unknown" };
+  const code = rawCode.trim().toLowerCase();
+  const reward = CODES[code];
+  if (!reward) return { ok: false, reason: "unknown" };
+
+  const session = readSession();
+  if (!session.name) return { ok: false, reason: "noSession" };
+  const accounts = readAccounts();
+  const a = accounts[session.name.toLowerCase()];
+  if (!a) return { ok: false, reason: "noSession" };
+
+  if (!a.redeemed) a.redeemed = {};
+  if (a.redeemed[reward.id]) return { ok: false, reason: "already" };
+  a.redeemed[reward.id] = true;
+
+  if (reward.coins) {
+    a.totalEver += reward.coins;
+    a.totalEverEaten += reward.coins;
+  }
+  if (reward.classes && reward.classes.length > 0) {
+    if (!a.owned) a.owned = {};
+    for (const c of reward.classes) a.owned[c] = true;
+  }
+  writeAccounts(accounts);
+  return { ok: true, reward };
 }
 
 export function levelFromXp(xp: number): { level: number; currentXp: number; neededXp: number } {
