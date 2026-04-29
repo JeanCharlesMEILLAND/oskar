@@ -106,7 +106,7 @@ export default function Home() {
               href: "/play/game?mode=solo",
             },
             {
-              emoji: "👥",
+              emoji: "🐢🐢",
               titleKey: "modes.duo.title" as const,
               descKey: "modes.duo.desc" as const,
               color: "from-amber-100 to-rose-100",
