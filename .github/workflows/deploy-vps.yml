@@ -1,0 +1,43 @@
+name: Deploy WS server to VPS
+
+# Trigger on push to main when server/ files change, or manually from the UI.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "server/**"
+      - "src/db/schema.ts"
+      - ".github/workflows/deploy-vps.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Pull, build, restart on VPS
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script: |
+            set -euo pipefail
+            cd /opt/zolwie
+            git fetch origin main
+            git reset --hard origin/main
+            cd server
+            npm install --omit=dev
+            npm install --include=dev
+            npm run build
+            systemctl restart zolwie-ws
+            sleep 1
+            systemctl is-active zolwie-ws
+            curl -fsS http://127.0.0.1:3001/health
+            echo
+            echo "Deploy OK"
