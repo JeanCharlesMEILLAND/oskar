@@ -7,6 +7,7 @@ import {
   timestamp,
   primaryKey,
   uniqueIndex,
+  index,
 } from "drizzle-orm/pg-core";
 
 export const accounts = pgTable(
@@ -69,6 +70,25 @@ export const eventState = pgTable("event_state", {
   endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
   createdBy: integer("created_by").references(() => accounts.id, { onDelete: "set null" }),
 });
+
+// Cross-device chat messages. Identifies users by name (matches the localStorage key style)
+// — auth tokens come later when the WebSocket server is up.
+export const chatMessages = pgTable(
+  "chat_messages",
+  {
+    id: serial("id").primaryKey(),
+    fromName: text("from_name").notNull(),
+    toName: text("to_name").notNull(),
+    text: text("text").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pairIdx: index("chat_pair_idx").on(t.fromName, t.toName),
+    pairReverseIdx: index("chat_pair_reverse_idx").on(t.toName, t.fromName),
+  }),
+);
+
+export type ChatMessage = typeof chatMessages.$inferSelect;
 
 export type AccountData = {
   monnaie: number;

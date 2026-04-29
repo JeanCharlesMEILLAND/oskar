@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { getCurrentSession } from "@/lib/auth";
-import { getMessages, sendMessage, type Message } from "@/lib/friends";
+import { getMessages as lsGetMessages, type Message } from "@/lib/friends";
+import { fetchMessages, postMessage, isApiHealthy } from "@/lib/chat";
 import { TurtleIcon } from "./TurtleIcon";
 
 const MSG_PREFIX = "zolwie:msg:";
@@ -190,7 +191,7 @@ function Picker({
               Ostatnie rozmowy
             </li>
             {recents.map((name) => {
-              const all = getMessages(myName, name);
+              const all = lsGetMessages(myName, name);
               const last = all[all.length - 1];
               return (
                 <li key={name}>
@@ -234,27 +235,53 @@ function Thread({
   friendName: string;
   onBack: () => void;
 }) {
-  const [messages, setMessages] = useState<Message[]>(() => getMessages(myName, friendName));
+  const [messages, setMessages] = useState<Message[]>([]);
   const [text, setText] = useState("");
+  const [healthy, setHealthy] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Poll for incoming messages every 1.5s (works for same-browser other tabs)
+  // Initial load
   useEffect(() => {
-    const interval = setInterval(() => {
-      setMessages(getMessages(myName, friendName));
-    }, 1500);
-    return () => clearInterval(interval);
+    let cancelled = false;
+    fetchMessages(myName, friendName).then((m) => {
+      if (!cancelled) {
+        setMessages(m);
+        setHealthy(isApiHealthy());
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [myName, friendName]);
+
+  // Poll for new messages every 2s (covers cross-device via API)
+  useEffect(() => {
+    let cancelled = false;
+    const interval = setInterval(async () => {
+      const m = await fetchMessages(myName, friendName);
+      if (!cancelled) {
+        setMessages(m);
+        setHealthy(isApiHealthy());
+      }
+    }, 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [myName, friendName]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages.length]);
 
-  const handleSend = (e: React.FormEvent) => {
+  const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    const msg = sendMessage(friendName, text);
+    const msg = await postMessage(myName, friendName, text);
     if (msg) {
-      setMessages(getMessages(myName, friendName));
+      // Optimistic — refresh from server so we see anything new from peer too
+      const fresh = await fetchMessages(myName, friendName);
+      setMessages(fresh);
+      setHealthy(isApiHealthy());
       setText("");
     }
   };
@@ -262,7 +289,7 @@ function Thread({
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       {/* Sub-header with back */}
-      <div className="px-4 py-2 border-b border-emerald-100 bg-emerald-50/40 flex items-center gap-2">
+      <div className="px-4 py-2 border-b border-emerald-100 bg-emerald-50/40 flex items-center justify-between gap-2">
         <button
           type="button"
           onClick={onBack}
@@ -270,6 +297,13 @@ function Thread({
         >
           ← Powrót
         </button>
+        <span
+          className={`text-[10px] uppercase tracking-widest ${
+            healthy ? "text-emerald-600" : "text-amber-700"
+          }`}
+        >
+          {healthy ? "● online" : "● offline (lokalne)"}
+        </span>
       </div>
 
       {/* Messages */}
@@ -350,7 +384,7 @@ function scanRecentChats(myName: string): string[] {
   } catch {}
   // Sort by latest message timestamp desc
   const ranked = Array.from(partners).map((p) => {
-    const msgs = getMessages(myName, p);
+    const msgs = lsGetMessages(myName, p);
     return { name: p, ts: msgs[msgs.length - 1]?.ts ?? 0 };
   });
   ranked.sort((a, b) => b.ts - a.ts);

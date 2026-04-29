@@ -230,8 +230,24 @@ export function GameCanvas({
     window.addEventListener("orientationchange", updateSize);
 
     const account = getCurrentAccount();
+    // Duo: read ?friend= from URL to pick the friend's class for P2
+    let p2ClassId = "normal";
+    if (mode === "duo" && typeof window !== "undefined") {
+      const urlFriend = new URLSearchParams(window.location.search).get("friend");
+      if (urlFriend) {
+        try {
+          const accountsRaw = localStorage.getItem("zolwie:zolwiki_accounts_v4");
+          if (accountsRaw) {
+            const accounts = JSON.parse(accountsRaw) as Record<string, { selectedClass?: string }>;
+            const friendAccount = accounts[urlFriend.toLowerCase()];
+            if (friendAccount?.selectedClass) p2ClassId = friendAccount.selectedClass;
+          }
+        } catch {}
+      }
+    }
     const state: GameState = createState(mode, {
       selectedClassId: account?.selectedClass ?? "normal",
+      p2ClassId,
     });
     const inputs: Inputs = {};
     const keysDown = new Set<string>();

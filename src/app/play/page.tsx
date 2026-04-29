@@ -43,6 +43,7 @@ export default function LobbyPage() {
   const [admin, setAdmin] = useState(false);
   const [event, setEvent] = useState<EventState>({ active: false, type: null, endsAt: 0 });
   const [showAdminPrompt, setShowAdminPrompt] = useState(false);
+  const [showDuoPicker, setShowDuoPicker] = useState(false);
 
   useEffect(() => {
     const a = getCurrentAccount();
@@ -227,6 +228,15 @@ export default function LobbyPage() {
           />
         )}
 
+        {showDuoPicker && (
+          <DuoFriendPicker
+            friends={account.friends ?? []}
+            onClose={() => setShowDuoPicker(false)}
+            onPick={(friend) => router.push(`/play/game?mode=duo&friend=${encodeURIComponent(friend)}`)}
+            onSkip={() => router.push("/play/game?mode=duo")}
+          />
+        )}
+
         {/* Daily challenge */}
         <DailyChallenge daily={account.daily} />
 
@@ -245,8 +255,11 @@ export default function LobbyPage() {
               gradient="from-lime-100 to-emerald-100"
               ring="ring-emerald-300"
             />
-            <ModeCard
-              href="/play/game?mode=duo"
+            <ModeCardButton
+              onClick={() => {
+                if ((account.friends?.length ?? 0) > 0) setShowDuoPicker(true);
+                else router.push("/play/game?mode=duo");
+              }}
               icon={<ModeIconDuo className="w-32" />}
               title={t("lobby.modeDuo.t")}
               desc={t("lobby.modeDuo.d")}
@@ -332,6 +345,105 @@ export default function LobbyPage() {
         </Link>
       </section>
     </main>
+  );
+}
+
+function ModeCardButton({
+  onClick,
+  icon,
+  title,
+  desc,
+  best,
+  gradient,
+  ring,
+}: {
+  onClick: () => void;
+  icon: React.ReactNode;
+  title: string;
+  desc: string;
+  best?: string;
+  gradient: string;
+  ring: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`group relative rounded-3xl bg-gradient-to-br ${gradient} border border-emerald-100/40 p-5 sm:p-6 transition hover:-translate-y-1 hover:shadow-2xl hover:ring-4 ${ring} text-left w-full`}
+    >
+      <div className="flex justify-center mb-3 sm:mb-4 transition-transform group-hover:scale-105">
+        {icon}
+      </div>
+      <h3 className="font-[var(--font-fraunces)] text-xl sm:text-2xl font-semibold text-emerald-950 text-center">
+        {title}
+      </h3>
+      <p className="mt-1 text-xs sm:text-sm text-emerald-900/65 text-center">{desc}</p>
+      {best && (
+        <p className="mt-3 text-center text-xs font-medium text-emerald-800 bg-white/60 rounded-full py-1 px-3 inline-block w-full">
+          {best}
+        </p>
+      )}
+    </button>
+  );
+}
+
+function DuoFriendPicker({
+  friends,
+  onPick,
+  onSkip,
+  onClose,
+}: {
+  friends: string[];
+  onPick: (name: string) => void;
+  onSkip: () => void;
+  onClose: () => void;
+}) {
+  const { lang } = useT();
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-emerald-950/60 backdrop-blur-sm p-4">
+      <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
+        <div className="flex items-start justify-between mb-4">
+          <p className="font-[var(--font-fraunces)] text-2xl font-semibold text-emerald-950">
+            👥 {lang === "pl" ? "Z kim grasz?" : "Avec qui ?"}
+          </p>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full bg-zinc-100 hover:bg-zinc-200 transition w-9 h-9 flex items-center justify-center text-zinc-700"
+          >
+            ✗
+          </button>
+        </div>
+        <p className="text-sm text-emerald-900/70 mb-4">
+          {lang === "pl"
+            ? "Drugi gracz dostanie klasę wybranego znajomego."
+            : "Le deuxième joueur prendra la classe de l'ami choisi."}
+        </p>
+        <div className="space-y-2 max-h-64 overflow-y-auto">
+          {friends.map((name) => (
+            <button
+              key={name}
+              type="button"
+              onClick={() => onPick(name)}
+              className="w-full flex items-center gap-3 rounded-2xl bg-emerald-50/60 hover:bg-emerald-100 active:bg-emerald-200 transition px-4 py-3 text-left"
+            >
+              <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center text-xl shrink-0">
+                🐢
+              </div>
+              <span className="flex-1 font-medium text-emerald-950 truncate">{name}</span>
+              <span className="text-emerald-700">→</span>
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={onSkip}
+          className="mt-5 w-full rounded-full border border-emerald-300 px-4 py-2.5 text-sm font-medium text-emerald-800 hover:bg-emerald-50 transition"
+        >
+          {lang === "pl" ? "Graj bez znajomego (klasa Normalny)" : "Sans ami (classe Normale)"}
+        </button>
+      </div>
+    </div>
   );
 }
 

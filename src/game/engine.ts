@@ -37,7 +37,7 @@ const POWERUP_KINDS: PowerUpKind[] = ["tomato", "star", "strawberry", "bomb"];
 
 export function createState(
   mode: Mode,
-  options: { selectedClassId?: string; seed?: number } = {},
+  options: { selectedClassId?: string; p2ClassId?: string; p2Name?: string; seed?: number } = {},
 ): GameState {
   const seed = options.seed ?? (Date.now() & 0xffffffff);
   const rng = mulberry32(seed);
@@ -47,6 +47,11 @@ export function createState(
   const color = visual
     ? { body: visual.body, shell: visual.shell, accent: visual.accent }
     : { body: "#4ade80", shell: "#22c55e", accent: "#16a34a" };
+
+  // Player 2 setup (duo only). If a friend is picked, use their selected class.
+  // P2 always shown in amber/yellow tint to distinguish from P1, but stats follow chosen class.
+  const p2ClassId = options.p2ClassId ?? "normal";
+  const p2Stats = getClassStats(p2ClassId);
 
   // bonusTime: extra seconds for solo/duo
   const baseTime =
@@ -77,16 +82,18 @@ export function createState(
     },
   ];
   if (mode === "duo") {
+    // Always amber/yellow tint for P2 (so players can tell each other apart)
+    // but stats come from the chosen class.
     turtles.push({
       id: "p2",
-      classId: "normal",
+      classId: p2ClassId,
       color: { body: "#facc15", shell: "#eab308", accent: "#fde047" },
       pos: { x: MAP_W / 2 + 80, y: MAP_H / 2 },
       vel: { x: 0, y: 0 },
       facing: "down",
       isMoving: false,
       score: 0,
-      lives: 1,
+      lives: p2Stats.lives,
       combo: 0,
       comboTimer: 0,
       invulnUntil: 0,
