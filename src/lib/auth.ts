@@ -340,6 +340,8 @@ export function buyClass(id: string, price: number): ShopResult {
   if (a.totalEver < price) return { ok: false, reason: "notEnough" };
   a.totalEver -= price;
   a.owned[id] = true;
+  // Auto-select the class you just bought (kid-friendly: buy = play with it).
+  a.selectedClass = id;
   writeAccounts(accounts);
   return { ok: true, account: a };
 }

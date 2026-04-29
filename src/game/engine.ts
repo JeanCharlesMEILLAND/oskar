@@ -365,14 +365,30 @@ function handleCollisions(state: GameState) {
             t.invulnUntil = state.tick + Math.floor(0.5 * TICK_RATE);
             break;
           }
-          // Bounce?
+          // Bounce? — Skoczek (bouncy) springs off the rock instead of taking damage.
           if (stats.bounce) {
             const dx = t.pos.x - r.pos.x;
             const dy = t.pos.y - r.pos.y;
             const d = Math.sqrt(dx * dx + dy * dy) || 1;
-            t.pos.x += (dx / d) * 30;
-            t.pos.y += (dy / d) * 30;
-            t.invulnUntil = state.tick + Math.floor(0.5 * TICK_RATE);
+            // Big punchy push so the bounce feels real
+            t.pos.x = clamp(t.pos.x + (dx / d) * 90, TURTLE_RADIUS, MAP_W - TURTLE_RADIUS);
+            t.pos.y = clamp(t.pos.y + (dy / d) * 90, TURTLE_RADIUS, MAP_H - TURTLE_RADIUS);
+            t.invulnUntil = state.tick + Math.floor(0.4 * TICK_RATE);
+            // Visual + audio feedback
+            for (let p = 0; p < 8; p++) {
+              state.particles.push({
+                pos: { ...t.pos },
+                vel: {
+                  x: (state.rng() - 0.5) * 6,
+                  y: (state.rng() - 0.5) * 6,
+                },
+                life: 22,
+                maxLife: 22,
+                color: ["#fbbf24", "#fde047", "#f97316"][Math.floor(state.rng() * 3)],
+                size: 3 + state.rng() * 3,
+              });
+            }
+            state.events.push({ type: "powerup", kind: "tomato" }); // re-use the boing-y SFX
             break;
           }
           // Damage
