@@ -15,12 +15,16 @@ const SALADS = [
 
 export function FallingSalads({ count }: { count?: number }) {
   const items = count ? SALADS.slice(0, count) : SALADS;
+  // On mobile, halve the visible count to avoid overlapping critical content.
+  const halfCount = Math.max(2, Math.ceil(items.length / 2));
   return (
     <div aria-hidden className="pointer-events-none fixed inset-0 overflow-hidden -z-0">
       {items.map((s, i) => (
         <span
           key={i}
-          className="absolute top-0 animate-salad-fall opacity-0"
+          className={`absolute top-0 animate-salad-fall opacity-0 ${
+            i >= halfCount ? "hidden sm:inline" : ""
+          }`}
           style={{
             left: `${s.left}%`,
             fontSize: `${s.size}px`,

@@ -210,7 +210,35 @@ export function downloadAccountBackup(account: Account) {
 export function logout() {
   const session = readSession();
   session.name = "";
+  session.isAdmin = false;
   writeSession(session);
+}
+
+const ADMIN_CODE = "oskar843";
+
+export function tryBecomeAdmin(code: string): boolean {
+  if (typeof window === "undefined") return false;
+  if (code.trim().toLowerCase() !== ADMIN_CODE) return false;
+  const session = readSession();
+  session.isAdmin = true;
+  writeSession(session);
+  return true;
+}
+
+export function isAdmin(): boolean {
+  if (typeof window === "undefined") return false;
+  return !!readSession().isAdmin;
+}
+
+export function levelFromXp(xp: number): { level: number; currentXp: number; neededXp: number } {
+  let lvl = 1;
+  let need = 0;
+  while (xp >= need + lvl * 10) {
+    need += lvl * 10;
+    lvl++;
+    if (lvl > 100) break;
+  }
+  return { level: lvl, currentXp: xp - need, neededXp: lvl * 10 };
 }
 
 export type GameResult = {

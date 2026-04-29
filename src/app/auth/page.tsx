@@ -69,28 +69,28 @@ export default function AuthPage() {
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-gradient-to-br from-lime-50 via-emerald-50 to-amber-50 font-[var(--font-inter)]">
-      <FallingSalads count={8} />
+      <FallingSalads count={5} />
 
-      <header className="relative z-10 mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
+      <header className="relative z-10 mx-auto flex max-w-6xl items-center justify-between gap-2 px-4 md:px-6 py-4 md:py-6">
         <Link
           href="/"
-          className="inline-flex items-center gap-2 font-[var(--font-fraunces)] text-xl font-semibold text-emerald-900 tracking-tight"
+          className="inline-flex items-center gap-2 font-[var(--font-fraunces)] text-base sm:text-lg md:text-xl font-semibold text-emerald-900 tracking-tight min-w-0"
         >
-          <TurtleIcon className="w-9 h-9" />
-          Żarłoczne Żółwie
+          <TurtleIcon className="w-7 h-7 md:w-9 md:h-9 shrink-0" />
+          <span className="truncate">Żarłoczne Żółwie</span>
         </Link>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 md:gap-3 shrink-0">
           <LanguageSwitch />
           <Link
             href="/"
-            className="text-sm text-emerald-700 hover:text-emerald-900 transition"
+            className="text-xs md:text-sm text-emerald-700 hover:text-emerald-900 transition whitespace-nowrap"
           >
             ← Lobby
           </Link>
         </div>
       </header>
 
-      <section className="relative z-10 mx-auto max-w-md px-6 pt-8 pb-24">
+      <section className="relative z-10 mx-auto max-w-md px-4 md:px-6 pt-6 md:pt-8 pb-16 md:pb-24">
         {/* Hero illustration */}
         <div className="flex justify-center mb-2">
           <div className="relative">
@@ -101,15 +101,15 @@ export default function AuthPage() {
           </div>
         </div>
 
-        <h1 className="text-center font-[var(--font-fraunces)] text-4xl md:text-5xl font-semibold leading-tight tracking-tight text-emerald-950">
+        <h1 className="text-center font-[var(--font-fraunces)] text-3xl sm:text-4xl md:text-5xl font-semibold leading-tight tracking-tight text-emerald-950">
           {isLogin ? t("auth.welcome") : t("auth.welcomeNew")}
         </h1>
-        <p className="mt-3 text-center text-emerald-900/65 max-w-sm mx-auto">
+        <p className="mt-3 text-center text-sm md:text-base text-emerald-900/65 max-w-sm mx-auto">
           {isLogin ? t("auth.subtitle") : t("auth.subtitleNew")}
         </p>
 
         {/* Card */}
-        <div className="mt-8 rounded-3xl border-2 border-emerald-100 bg-white/80 backdrop-blur-md p-6 md:p-8 shadow-xl shadow-emerald-900/5">
+        <div className="mt-6 md:mt-8 rounded-3xl border-2 border-emerald-100 bg-white/80 backdrop-blur-md p-5 sm:p-6 md:p-8 shadow-xl shadow-emerald-900/5">
           {/* Tabs */}
           <div className="flex p-1 bg-emerald-100/60 rounded-full mb-6">
             <button

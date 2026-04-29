@@ -31,6 +31,7 @@ import {
 } from "./constants";
 import { clamp, dist2, mulberry32, randRange } from "./util";
 import { CLASS_STATS, getClassStats, TURTLES_BY_ID } from "@/data/turtles";
+import { getEventState } from "@/lib/events";
 
 const POWERUP_KINDS: PowerUpKind[] = ["tomato", "star", "strawberry", "bomb"];
 
@@ -98,6 +99,11 @@ export function createState(
     });
   }
 
+  // Read active event (admin-triggered) — boosts gold chance / points / spawn rate
+  const eventState = getEventState();
+  const eventDouble = eventState.active && eventState.type === "double";
+  const eventRain = eventState.active && eventState.type === "rain";
+
   const state: GameState = {
     tick: 0,
     mode,
@@ -114,14 +120,18 @@ export function createState(
     nextPowerUpId: 1,
     spawnLettuceTimer: 0,
     spawnRockTimer: 0,
-    spawnPowerUpTimer: 0,
-    goldLettuceChance: 0,
-    pointsMultiplier: 1,
+    // During salad rain, spawn power-ups slightly faster too
+    spawnPowerUpTimer: eventRain ? -3 : 0,
+    // Event 2× → 10% gold lettuce chance + 2× points
+    goldLettuceChance: eventDouble ? 0.1 : 0,
+    pointsMultiplier: eventDouble ? 2 : 1,
     rng,
     mapSeed: seed,
     events: [],
   };
-  for (let i = 0; i < LETTUCE_INITIAL_COUNT; i++) spawnLettuce(state);
+  // Salad rain → start with more lettuces
+  const initialLettuceCount = eventRain ? LETTUCE_INITIAL_COUNT * 2 : LETTUCE_INITIAL_COUNT;
+  for (let i = 0; i < initialLettuceCount; i++) spawnLettuce(state);
   for (let i = 0; i < ROCK_INITIAL_COUNT; i++) spawnRock(state);
   return state;
 }

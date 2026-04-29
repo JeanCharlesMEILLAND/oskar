@@ -20,46 +20,46 @@ export default function ZolwiePage() {
   const { t, lang } = useT();
   return (
     <main className="relative min-h-screen overflow-hidden bg-gradient-to-br from-lime-50 via-emerald-50 to-amber-50 font-[var(--font-inter)]">
-      <FallingSalads count={8} />
+      <FallingSalads count={5} />
 
-      <header className="relative z-10 mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
+      <header className="relative z-10 mx-auto flex max-w-6xl items-center justify-between gap-2 px-4 md:px-6 py-4 md:py-6">
         <Link
           href="/"
-          className="inline-flex items-center gap-2 font-[var(--font-fraunces)] text-xl font-semibold text-emerald-900 tracking-tight"
+          className="inline-flex items-center gap-2 font-[var(--font-fraunces)] text-base sm:text-lg md:text-xl font-semibold text-emerald-900 tracking-tight min-w-0"
         >
-          <TurtleIcon className="w-9 h-9" />
-          Żarłoczne Żółwie
+          <TurtleIcon className="w-7 h-7 md:w-9 md:h-9 shrink-0" />
+          <span className="truncate">Żarłoczne Żółwie</span>
         </Link>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 md:gap-3 shrink-0">
           <LanguageSwitch />
-          <Link href="/" className="text-sm text-emerald-700 hover:text-emerald-900 transition">
+          <Link href="/" className="text-xs md:text-sm text-emerald-700 hover:text-emerald-900 transition whitespace-nowrap">
             ← Lobby
           </Link>
         </div>
       </header>
 
-      <section className="relative z-10 mx-auto max-w-6xl px-6 pt-8 pb-24">
-        <div className="text-center mb-12">
-          <h1 className="font-[var(--font-fraunces)] text-5xl md:text-6xl font-semibold leading-[0.95] tracking-tight text-emerald-950">
+      <section className="relative z-10 mx-auto max-w-6xl px-4 md:px-6 pt-6 md:pt-8 pb-16 md:pb-24">
+        <div className="text-center mb-8 md:mb-12">
+          <h1 className="font-[var(--font-fraunces)] text-4xl sm:text-5xl md:text-6xl font-semibold leading-[0.95] tracking-tight text-emerald-950">
             {t("zolwie.title")}
           </h1>
-          <p className="mt-4 text-emerald-900/60 italic">{t("zolwie.subtitle")}</p>
+          <p className="mt-3 md:mt-4 text-sm md:text-base text-emerald-900/60 italic px-2">{t("zolwie.subtitle")}</p>
         </div>
 
         {RARITY_ORDER.map((rarity) => {
           const items = TURTLES.filter((t) => t.rarity === rarity);
           if (!items.length) return null;
           return (
-            <section key={rarity} className="mb-14">
-              <div className="mb-5 flex items-baseline justify-between">
-                <h2 className="font-[var(--font-fraunces)] text-2xl md:text-3xl font-semibold text-emerald-950">
+            <section key={rarity} className="mb-10 md:mb-14">
+              <div className="mb-4 md:mb-5 flex items-baseline justify-between">
+                <h2 className="font-[var(--font-fraunces)] text-xl sm:text-2xl md:text-3xl font-semibold text-emerald-950">
                   {t(RARITY_KEY[rarity])}
                 </h2>
-                <span className="text-xs uppercase tracking-widest text-emerald-900/50">
+                <span className="text-[11px] md:text-xs uppercase tracking-widest text-emerald-900/50">
                   {items.length}
                 </span>
               </div>
-              <div className="grid gap-5 grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+              <div className="grid gap-3 sm:gap-4 md:gap-5 grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
                 {items.map((turtle) => (
                   <TurtleCard
                     key={turtle.id}
@@ -82,7 +82,7 @@ export default function ZolwiePage() {
           );
         })}
 
-        <div className="mt-12 rounded-2xl bg-emerald-900 text-emerald-50 p-6 text-center text-sm">
+        <div className="mt-10 md:mt-12 rounded-2xl bg-emerald-900 text-emerald-50 p-5 md:p-6 text-center text-xs md:text-sm">
           {t("zolwie.hoverHint")}
         </div>
       </section>

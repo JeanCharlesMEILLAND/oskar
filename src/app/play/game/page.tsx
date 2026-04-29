@@ -46,12 +46,16 @@ function GameInner() {
         Lobby
       </Link>
       <GameCanvas mode={mode} />
-      {/* Discrete back-to-lobby button bottom-left */}
+      {/* Back-to-lobby button — top-center on mobile (avoids minimap top-right and
+          joysticks at bottom). Sits between score cards (left) and minimap (right). */}
       <Link
         href="/play"
-        className="fixed bottom-4 left-4 z-50 inline-flex items-center gap-2 rounded-full bg-white/85 backdrop-blur px-4 py-2 text-sm font-medium text-emerald-900 shadow-lg hover:bg-white transition"
+        className="fixed left-1/2 -translate-x-1/2 z-50 inline-flex items-center gap-1.5 rounded-full bg-white/85 backdrop-blur px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium text-emerald-900 shadow-lg hover:bg-white transition"
+        style={{
+          top: "max(env(safe-area-inset-top), 12px)",
+        }}
       >
-        <TurtleIcon className="w-5 h-5" />
+        <TurtleIcon className="w-4 h-4 sm:w-5 sm:h-5" />
         Lobby
       </Link>
     </>

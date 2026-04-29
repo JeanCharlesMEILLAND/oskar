@@ -768,15 +768,15 @@ export function TurtleCard({
   };
   return (
     <article
-      className={`group relative overflow-hidden rounded-3xl border-2 bg-gradient-to-br p-5 transition hover:-translate-y-1 hover:shadow-xl ${rarityStyles[rarity] ?? rarityStyles.basic}`}
+      className={`group relative overflow-hidden rounded-3xl border-2 bg-gradient-to-br p-3 sm:p-5 transition hover:-translate-y-1 hover:shadow-xl ${rarityStyles[rarity] ?? rarityStyles.basic}`}
     >
-      <div className="absolute right-3 top-3 text-[10px] uppercase tracking-widest text-emerald-900/60 z-10">
+      <div className="absolute right-2 top-2 sm:right-3 sm:top-3 text-[9px] sm:text-[10px] uppercase tracking-widest text-emerald-900/60 z-10">
         {rarity}
       </div>
       <div className="flex justify-center py-2 [perspective:900px]">
-        <div className="relative h-36 md:h-40 w-32 md:w-36 transition-transform duration-700 [transform-style:preserve-3d] group-hover:[transform:rotateY(180deg)]">
+        <div className="relative h-28 sm:h-36 md:h-40 w-24 sm:w-32 md:w-36 transition-transform duration-700 [transform-style:preserve-3d] group-hover:[transform:rotateY(180deg)]">
           <div className="absolute inset-0 flex items-center justify-center [backface-visibility:hidden]">
-            <Turtle {...visual} idKey={id} className="w-32 md:w-36" />
+            <Turtle {...visual} idKey={id} className="w-24 sm:w-32 md:w-36" />
           </div>
           <div className="absolute inset-0 flex items-center justify-center [backface-visibility:hidden] [transform:rotateY(180deg)]">
             <TurtleTop
@@ -787,15 +787,15 @@ export function TurtleCard({
               accessory={visual.accessory}
               aura={visual.aura}
               idKey={`top-${id}`}
-              className="w-28 md:w-32"
+              className="w-20 sm:w-28 md:w-32"
             />
           </div>
         </div>
       </div>
-      <h3 className="mt-1 text-center font-[var(--font-fraunces)] text-lg font-semibold text-emerald-950">
+      <h3 className="mt-1 text-center font-[var(--font-fraunces)] text-sm sm:text-lg font-semibold text-emerald-950 leading-tight">
         {name}
       </h3>
-      <p className="mt-1 text-center text-xs text-emerald-900/60 italic">{desc}</p>
+      <p className="mt-1 text-center text-[11px] sm:text-xs text-emerald-900/60 italic line-clamp-2">{desc}</p>
       {children}
       <p className="mt-2 text-center text-[9px] uppercase tracking-widest text-emerald-700/40 opacity-0 group-hover:opacity-100 transition">
         sprite ↻

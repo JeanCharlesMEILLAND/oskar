@@ -28,6 +28,28 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-inter), system-ui, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
+/* Prevent iOS rubber-band scroll inside the fullscreen game */
+html,
+body {
+  overscroll-behavior: none;
+}
+
+/* Disable text selection on game UI overlays so touch inputs feel snappy */
+.no-select {
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: none;
+}
+
+/* Coarse-pointer-only utility (mobile / touch devices) */
+@media (hover: hover) and (pointer: fine) {
+  .touch-only {
+    display: none !important;
+  }
 }
 
 /* ============ Forêt enchantée animations ============ */
@@ -78,4 +100,19 @@ body {
 .animate-shimmer {
   background-size: 200% 100%;
   animation: shimmer 3s linear infinite;
+}
+
+/* Slow pulse for event banners */
+@keyframes pulse-slow {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.95;
+    transform: scale(1.005);
+  }
+}
+.animate-pulse-slow {
+  animation: pulse-slow 2.5s ease-in-out infinite;
 }
