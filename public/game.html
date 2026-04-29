@@ -1,0 +1,2669 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>Zarloczne Zolwie</title>
+<style>
+  html, body { margin: 0; padding: 0; min-height: 100vh; background: linear-gradient(135deg, #ecfccb 0%, #d1fae5 50%, #fef3c7 100%); font-family: system-ui, -apple-system, sans-serif; }
+  #root { padding: 0 !important; }
+</style>
+<script>
+window.storage = {
+  async get(key, shared) {
+    try {
+      const v = localStorage.getItem('zolwie:' + key);
+      if (v === null) return null;
+      return { key: key, value: v, shared: !!shared };
+    } catch(e) { return null; }
+  },
+  async set(key, value, shared) {
+    try { localStorage.setItem('zolwie:' + key, value); } catch(e) {}
+  },
+  async delete(key, shared) {
+    try { localStorage.removeItem('zolwie:' + key); } catch(e) {}
+  },
+  async list(prefix, shared) {
+    const out = []; const p = 'zolwie:' + (prefix || '');
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith(p)) out.push(k.slice(7));
+      }
+    } catch(e) {}
+    return out;
+  }
+};
+// Auto-launch a mode if ?mode=solo|duo|endless is in the URL.
+// Polls because the legacy renders the lobby asynchronously after loading accounts.
+(function() {
+  const params = new URLSearchParams(location.search);
+  const mode = params.get('mode');
+  if (!mode) return;
+  const idMap = { solo: 'playSolo', duo: 'playDuo', endless: 'playEndless' };
+  const btnId = idMap[mode];
+  if (!btnId) return;
+  let tries = 0;
+  const interval = setInterval(function() {
+    tries++;
+    const btn = document.getElementById(btnId);
+    if (btn) { clearInterval(interval); btn.click(); }
+    else if (tries > 60) { clearInterval(interval); }
+  }, 100);
+})();
+</script>
+</head>
+<body>
+<div id="root" style="padding: 1rem 0;"></div>
+<script>
+(function() {
+  const root = document.getElementById('root');
+  const SESSION_KEY = 'zolwiki_session_v4';
+  const ACCOUNTS_KEY = 'zolwiki_accounts_v4';
+  const RANK_SOLO_KEY = 'zolwiki_rank_solo_v4';
+  const RANK_DUO_KEY = 'zolwiki_rank_duo_v4';
+  const RANK_ENDLESS_KEY = 'zolwiki_rank_endless_v7';
+  const EVENT_KEY = 'zolwiki_event_v4';
+  const ADMIN_CODE = 'oskar843';
+  const EVENT_DURATION = 5 * 60 * 1000;
+
+  // === ACHIEVEMENTS (odznaki) ===
+  const ACH_REWARD = 30;
+  const ACHIEVEMENTS = [
+    { id: 'first_win',    emoji: '🥇', names: { pl: 'Pierwsza wygrana',    fr: 'Première victoire' } },
+    { id: 'combo3',       emoji: '🔥', names: { pl: 'Combo Master',         fr: 'Maître Combo' } },
+    { id: 'combo5',       emoji: '🎯', names: { pl: 'Sniper (combo ×3)',    fr: 'Sniper (combo ×3)' } },
+    { id: 'speedrun',     emoji: '⚡', names: { pl: 'Speedrun (10 w 30s)',  fr: 'Speedrun (10 en 30s)' } },
+    { id: 'collector5',   emoji: '💎', names: { pl: 'Kolekcjoner (5 klas)', fr: 'Collectionneur (5)' } },
+    { id: 'rich',         emoji: '👑', names: { pl: 'Bogacz (1000 monet)',  fr: 'Riche (1000 pièces)' } },
+    { id: 'pacifist',     emoji: '🛡️', names: { pl: 'Pacyfista (bez trafienia)', fr: 'Pacifiste (sans coup)' } },
+    { id: 'allbasic',     emoji: '🌈', names: { pl: 'Wszystkie podstawowe', fr: 'Toutes basiques' } },
+    { id: 'firstrare',    emoji: '🎀', names: { pl: 'Pierwsza rzadka',      fr: 'Première rare' } },
+    { id: 'firstepic',    emoji: '✨', names: { pl: 'Pierwsza epicka',      fr: 'Première épique' } },
+    { id: 'firstlegend',  emoji: '🚀', names: { pl: 'Pierwsza legendarna',  fr: 'Première légendaire' } },
+    { id: 'endless50',    emoji: '♾️', names: { pl: 'Endless 50s',           fr: 'Endless 50s' } },
+    { id: 'endless100',   emoji: '🏆', names: { pl: 'Endless 100s',          fr: 'Endless 100s' } },
+    { id: 'goldsalad',    emoji: '🌟', names: { pl: 'Złota sałata',          fr: 'Salade dorée' } },
+    { id: 'powerup10',    emoji: '🎁', names: { pl: '10 power-upów',         fr: '10 power-ups' } },
+    { id: 'vipmaster',    emoji: '💎', names: { pl: 'VIP Master',             fr: 'VIP Master' } }
+  ];
+
+  // === DAILY CHALLENGES ===
+  const DAILY_CHALLENGES = [
+    { id: 'd_score15',    target: 15, type: 'score_solo', names: { pl: 'Zdobądź 15 sałat solo',     fr: 'Marque 15 salades solo' } },
+    { id: 'd_score20',    target: 20, type: 'score_solo', names: { pl: 'Zdobądź 20 sałat solo',     fr: 'Marque 20 salades solo' } },
+    { id: 'd_combo4',     target: 4,  type: 'combo',      names: { pl: 'Combo ×3 (4 razy)',          fr: 'Combo ×3 (4 fois)' } },
+    { id: 'd_powerup3',   target: 3,  type: 'powerups',   names: { pl: 'Zbierz 3 power-upy',         fr: 'Ramasse 3 power-ups' } },
+    { id: 'd_winsolo',    target: 2,  type: 'wins_solo',  names: { pl: 'Wygraj 2 razy solo',         fr: 'Gagne 2 fois solo' } },
+    { id: 'd_endless30',  target: 60, type: 'endless',    names: { pl: 'Endless: przetrwaj 60s',     fr: 'Endless : survis 60s' } },
+    { id: 'd_gold2',      target: 2,  type: 'gold',       names: { pl: 'Zjedz 2 złote sałaty',       fr: 'Mange 2 salades dorées' } }
+  ];
+  const DAILY_REWARD = 100;
+
+  // === POWER-UPS ===
+  const POWERUP_TYPES = {
+    tomato:     { emoji: '🍅', color: '#C75A5A', names: { pl: '+5s czasu',          fr: '+5s temps' } },
+    star:       { emoji: '⭐', color: '#FAC775', names: { pl: 'Nietykalność 5s',     fr: 'Invincible 5s' } },
+    strawberry: { emoji: '🍓', color: '#E84A6F', names: { pl: 'Magnes globalny 3s', fr: 'Aimant total 3s' } },
+    bomb:       { emoji: '💣', color: '#3A3A3A', names: { pl: 'Czyści kamienie',     fr: 'Efface cailloux' } }
+  };
+  const POWERUP_KEYS = Object.keys(POWERUP_TYPES);
+
+  const RARITY = {
+    basic:     { price: 100, color: '#97C459', dark: '#3B6D11', bg: '#EAF3DE', names: { pl: 'Podstawowa', fr: 'Basique' } },
+    rare:      { price: 150, color: '#85B7EB', dark: '#185FA5', bg: '#E6F1FB', names: { pl: 'Rzadka', fr: 'Rare' } },
+    epic:      { price: 200, color: '#AFA9EC', dark: '#534AB7', bg: '#EEEDFE', names: { pl: 'Epicka', fr: 'Épique' } },
+    legendary: { price: 300, color: '#FAC775', dark: '#BA7517', bg: '#FAEEDA', names: { pl: 'Legendarna', fr: 'Légendaire' } },
+    limited:   { price: 1500, color: '#E84A6F', dark: '#7A1A8C', bg: '#FCE5F2', names: { pl: '💎 LIMITED', fr: '💎 LIMITED' } }
+  };
+
+  // Cap maksymalnej speed żeby gra była grywalna (3.5 * 2 = 7 px/klatka to max sensowny)
+  const MAX_SPEED_MULT = 2.0;
+
+  // === LEVEL SYSTEM ===
+  // Level liczony od totalEverEaten (suma sałat zjedzonych w całym życiu konta)
+  // Każdy level wymaga coraz więcej. Lvl 1 = start, lvl 50 = mega-grind.
+  function levelFromXp(xp) {
+    // 0-9 = lvl 1, 10-29 = lvl 2, 30-59 = lvl 3, 60-99 = lvl 4, ...
+    // Wzór: xp_needed_for_level(n) = 10 * n * (n-1) / 2 + 10*(n-1)
+    // Czyli kumulatywnie: lvl 1: 0, lvl 2: 10, lvl 3: 30, lvl 4: 60, lvl 5: 100, lvl 6: 150...
+    let lvl = 1;
+    let need = 0;
+    while (xp >= need + lvl * 10) {
+      need += lvl * 10;
+      lvl++;
+      if (lvl > 100) break; // cap
+    }
+    return { level: lvl, currentXp: xp - need, neededXp: lvl * 10 };
+  }
+
+  // === KOLORY AVATARA (do customizacji) ===
+  const AVATAR_PRESETS = [
+    { id: 'green',    shell: '#3B6D11', inner: '#27500A', skin: '#639922', name: { pl: 'Zielony',  fr: 'Vert' } },
+    { id: 'blue',     shell: '#185FA5', inner: '#0C447C', skin: '#85B7EB', name: { pl: 'Niebieski', fr: 'Bleu' } },
+    { id: 'red',      shell: '#A52828', inner: '#7C1414', skin: '#EB8585', name: { pl: 'Czerwony', fr: 'Rouge' } },
+    { id: 'orange',   shell: '#BA7517', inner: '#854F0B', skin: '#EF9F27', name: { pl: 'Pomarańczowy', fr: 'Orange' } },
+    { id: 'pink',     shell: '#A52867', inner: '#7C144B', skin: '#EB85BB', name: { pl: 'Różowy', fr: 'Rose' } },
+    { id: 'purple',   shell: '#534AB7', inner: '#3C3489', skin: '#AFA9EC', name: { pl: 'Fioletowy', fr: 'Violet' } },
+    { id: 'gold',     shell: '#BA7517', inner: '#854F0B', skin: '#FAC775', name: { pl: 'Złoty',   fr: 'Doré' } },
+    { id: 'rainbow',  shell: 'rainbow', inner: 'rainbow', skin: 'rainbow', name: { pl: 'Tęczowy', fr: 'Arc-en-ciel' }, requireMaster: true }
+  ];
+
+  const CLASSES = {
+    // === BASIC (100 monet) — proste, jeden bonus ===
+    normal:    { rarity: 'basic', emoji: '🐢', speed: 1, points: 1, lives: 1, names: { pl: 'Normalny', fr: 'Normale' }, descs: { pl: 'klasyczny żółwik', fr: 'tortue classique' } },
+    fast:      { rarity: 'basic', emoji: '⚡', speed: 1.5, points: 1, lives: 1, names: { pl: 'Szybki', fr: 'Rapide' }, descs: { pl: '1.5× szybszy', fr: '1.5× plus rapide' } },
+    strong:    { rarity: 'basic', emoji: '🛡️', speed: 1, points: 1, lives: 2, names: { pl: 'Mocny', fr: 'Costaud' }, descs: { pl: '2 życia', fr: '2 vies' } },
+    double:    { rarity: 'basic', emoji: '✌️', speed: 1, points: 2, lives: 1, names: { pl: 'Podwójniak', fr: 'Doubleur' }, descs: { pl: '1 sałata = 2 pkt', fr: '1 salade = 2 pts' } },
+    leafy:     { rarity: 'basic', emoji: '🌿', speed: 1, points: 1, lives: 1, magnet: 50, names: { pl: 'Trawiasty', fr: 'Herbeux' }, descs: { pl: 'magnes z bliska', fr: 'aimant de près' } },
+    sneaky:    { rarity: 'basic', emoji: '🥷', speed: 1, points: 1, lives: 1, dodge: 0.3, names: { pl: 'Cichy', fr: 'Furtif' }, descs: { pl: '30% kamień chybi', fr: '30% caillou rate' } },
+    happy:     { rarity: 'basic', emoji: '😊', speed: 1, points: 1, lives: 1, bonusTime: 10, names: { pl: 'Szczęściarz', fr: 'Chanceux' }, descs: { pl: '+10s czasu', fr: '+10s' } },
+    ninja:     { rarity: 'basic', emoji: '🗡️', speed: 1.3, points: 1.3, lives: 1, names: { pl: 'Ninja', fr: 'Ninja' }, descs: { pl: '1.3× wszystko', fr: '1.3× tout' } },
+    rainbow:   { rarity: 'basic', emoji: '🌈', speed: 1.1, points: 1, lives: 1, rainbow: true, magnet: 40, names: { pl: 'Tęczowy', fr: 'Arc-en-ciel' }, descs: { pl: 'mieni się tęczą', fr: 'arc-en-ciel' } },
+    // === RARE (150 monet) — 2 bonusy lub mocny single ===
+    bouncy:    { rarity: 'rare', emoji: '🏀', speed: 1.1, points: 1, lives: 2, bounce: true, names: { pl: 'Skoczek', fr: 'Sauteur' }, descs: { pl: 'odbija się + 2 życia', fr: 'rebondit + 2 vies' } },
+    chubby:    { rarity: 'rare', emoji: '🍔', speed: 0.8, points: 1, lives: 3, names: { pl: 'Pulchny', fr: 'Dodu' }, descs: { pl: 'wolny, 3 życia', fr: 'lent, 3 vies' } },
+    sleepy:    { rarity: 'rare', emoji: '😴', speed: 0.7, points: 3, lives: 1, names: { pl: 'Śpioch', fr: 'Dormeur' }, descs: { pl: 'wolny, 1 sałata = 3 pkt', fr: 'lent, 1 salade = 3 pts' } },
+    fire:      { rarity: 'rare', emoji: '🔥', speed: 1.5, points: 1.5, lives: 1, names: { pl: 'Ognisty', fr: 'Ardent' }, descs: { pl: '1.5× wszystko', fr: '1.5× tout' } },
+    ice:       { rarity: 'rare', emoji: '❄️', speed: 1, points: 1.2, lives: 1, freezeRocks: true, names: { pl: 'Lodowy', fr: 'Glacial' }, descs: { pl: 'kamienie nie ranią!', fr: 'cailloux inoffensifs!' } },
+    thunder:   { rarity: 'rare', emoji: '🌩️', speed: 1.8, points: 1, lives: 1, names: { pl: 'Burzowy', fr: 'Foudroyant' }, descs: { pl: '1.8× szybkość', fr: '1.8× vitesse' } },
+    armored:   { rarity: 'rare', emoji: '⚔️', speed: 0.9, points: 1.2, lives: 3, names: { pl: 'Pancerny', fr: 'Blindé' }, descs: { pl: '3 życia + bonus pkt', fr: '3 vies + bonus' } },
+    magnet:    { rarity: 'rare', emoji: '🧲', speed: 1, points: 1, lives: 1, magnet: 100, names: { pl: 'Magnetyk', fr: 'Aimant' }, descs: { pl: 'duży magnes', fr: 'gros aimant' } },
+    royal:     { rarity: 'rare', emoji: '👑', speed: 1, points: 3, lives: 1, names: { pl: 'Królewski', fr: 'Royal' }, descs: { pl: '1 sałata = 3 pkt', fr: '1 salade = 3 pts' } },
+    cosmic:    { rarity: 'rare', emoji: '🌌', speed: 1.3, points: 1, lives: 1, bonusTime: 15, names: { pl: 'Kosmiczny', fr: 'Cosmique' }, descs: { pl: '+15s + szybkość', fr: '+15s + vitesse' } },
+    forest:    { rarity: 'rare', emoji: '🌳', speed: 1, points: 1, lives: 2, magnet: 70, names: { pl: 'Leśny', fr: 'Forestier' }, descs: { pl: 'magnes + 2 życia', fr: 'aimant + 2 vies' } },
+    swift:     { rarity: 'rare', emoji: '💨', speed: 1.8, points: 1, lives: 1, names: { pl: 'Wiatr', fr: 'Vent' }, descs: { pl: '1.8× szybkość', fr: '1.8× vitesse' } },
+    // === EPIC (200 monet) ===
+    dragon:    { rarity: 'epic', emoji: '🐉', speed: 1.8, points: 2, lives: 2, names: { pl: 'Smoczy', fr: 'Dragon' }, descs: { pl: 'szybki + 2× pkt + 2 życia', fr: 'rapide + 2× pts + 2 vies' } },
+    crystal:   { rarity: 'epic', emoji: '💎', speed: 0.95, points: 1.3, lives: 4, magnet: 80, names: { pl: 'Kryształ', fr: 'Cristal' }, descs: { pl: '4 życia + magnes', fr: '4 vies + aimant' } },
+    shadow:    { rarity: 'epic', emoji: '🌑', speed: 1.4, points: 1.5, lives: 2, dodge: 0.5, names: { pl: 'Cień', fr: 'Ombre' }, descs: { pl: '50% uniki + 2 życia', fr: '50% esquive + 2 vies' } },
+    sun:       { rarity: 'epic', emoji: '☀️', speed: 1.5, points: 1.5, lives: 1, magnet: 60, names: { pl: 'Słoneczny', fr: 'Soleil' }, descs: { pl: '1.5× + magnes', fr: '1.5× + aimant' } },
+    galaxy:    { rarity: 'epic', emoji: '🪐', speed: 1.2, points: 2, lives: 2, bonusTime: 30, names: { pl: 'Galaktyczny', fr: 'Galactique' }, descs: { pl: '+30s + 2× pkt', fr: '+30s + 2× pts' } },
+    rocket:    { rarity: 'epic', emoji: '🚀', speed: 2, points: 1.5, lives: 1, names: { pl: 'Rakietowy', fr: 'Fusée' }, descs: { pl: '2× szybkość + bonus', fr: '2× vitesse + bonus' } },
+    // === LEGENDARY (300 monet) — wszystkie mocne, wybór stylu gry ===
+    god:       { rarity: 'legendary', emoji: '✨', speed: 2, points: 3, lives: 3, names: { pl: 'Boski', fr: 'Divin' }, descs: { pl: 'mocny + 3 życia', fr: 'puissant + 3 vies' } },
+    phoenix:   { rarity: 'legendary', emoji: '🔥', speed: 1.5, points: 2, lives: 5, magnet: 90, names: { pl: 'Feniks', fr: 'Phénix' }, descs: { pl: '5 żyć + magnes', fr: '5 vies + aimant' } },
+    titan:     { rarity: 'legendary', emoji: '🏆', speed: 1.8, points: 2, lives: 3, magnet: 100, dodge: 0.4, names: { pl: 'Tytan', fr: 'Titan' }, descs: { pl: 'wszystkie moce', fr: 'tous les pouvoirs' } },
+    // === LIMITED (cena rośnie, każda klasa coraz mocniejsza) ===
+    vip_limited: {
+      rarity: 'limited', emoji: '🥇', customPrice: 1500,
+      speed: 2, points: 2.5, lives: 3, magnet: 80, dodge: 0.4,
+      names: { pl: 'VIP Limited', fr: 'VIP Limited' },
+      descs: { pl: 'limitowana klasa VIP!', fr: 'classe VIP limitée!' }
+    },
+    svip_limited: {
+      rarity: 'limited', emoji: '💠', customPrice: 3000,
+      speed: 2, points: 3, lives: 4, magnet: 100, dodge: 0.5, bonusTime: 20,
+      names: { pl: 'SVIP Limited', fr: 'SVIP Limited' },
+      descs: { pl: 'super VIP, 4 życia', fr: 'super VIP, 4 vies' }
+    },
+    gvip_limited: {
+      rarity: 'limited', emoji: '👑', customPrice: 5000,
+      speed: 2, points: 4, lives: 5, magnet: 120, dodge: 0.6, bonusTime: 30,
+      names: { pl: 'GVIP Limited', fr: 'GVIP Limited' },
+      descs: { pl: 'GIGA VIP, 5 żyć', fr: 'GIGA VIP, 5 vies' }
+    },
+    zolwiomly_bogacz: {
+      rarity: 'limited', emoji: '💎', customPrice: 10000,
+      speed: 2, points: 5, lives: 7, magnet: 150, dodge: 0.7, bonusTime: 60,
+      names: { pl: 'Zulwio Bogacz', fr: 'Zulwio Riche' },
+      descs: { pl: '💎 NAJMOCNIEJSZY!', fr: '💎 LE PLUS FORT!' }
+    }
+  };
+
+  const T_LANG = {
+    pl: {
+      title: 'Żółwiki', tabLogin: 'Zaloguj', tabRegister: 'Załóż konto',
+      yourName: 'Imię', password: 'Hasło', passwordAgain: 'Powtórz hasło',
+      loginBtn: 'Zaloguj się →', registerBtn: 'Załóż konto →',
+      hi: 'Cześć', logout: 'wyloguj', coins: 'Sałatomonety',
+      bestSolo: 'Rekord solo', bestDuo: 'Rekord duo', classesOwned: 'Klasy',
+      shopBtn: '🛒 SKLEP Z KLASAMI',
+      shopTitle: 'Sklep z klasami (30!)',
+      backToLobby: '← Wróć do lobby',
+      classHint: 'Kupujesz raz — zostaje na zawsze!',
+      pickMode: 'Wybierz tryb', solo: 'Solo', duo: 'Duo',
+      ranking: '🏆 Ranking', noPlays: 'Jeszcze nikt',
+      buy: 'Kup', pick: 'Wybierz', selected: '✓ wybrana', owned: '✓ Posiadasz',
+      notEnough: 'Brak monet', lobby: '← Lobby', time: 'Czas',
+      controls: 'strzałki', controlsDuo: '🟢 strzałki • 🟡 WASD',
+      hitRock: 'Auć! Kamień! 🪨', timeUp: 'Koniec!',
+      youWin: 'Brawo!', newRecord: '🏆 REKORD!', lettucesLabel: 'Sałaty:',
+      backingToLobby: 'Wracam...', errEmpty: 'Wpisz wszystko',
+      errBadLogin: 'Złe imię lub hasło', errExists: 'Imię zajęte',
+      errPassMatch: 'Hasła różne', errPassShort: 'Min 4 znaki',
+      tip: '🔒 Hasło chroni twoje konto.',
+      adminTitle: 'Jesteś adminem!', startEvent: '🎉 Event 2× (5min)',
+      eventActive: '✨ EVENT 2× ✨', stopEvent: 'Zatrzymaj',
+      makeAdmin: 'Stań się adminem', adminCode: 'Tajny kod',
+      becomeAdmin: 'Aktywuj', wrongCode: 'Zły kod!',
+      eventBoost: '✨ Event! 2× wszystko!',
+      filterAll: 'Wszystkie', currentClass: 'Aktualna klasa',
+      target: 'Cel', combo: 'Combo', sound: '🔊', soundOff: '🔇',
+      starterGift: '🎁 Bonus na start: +50 sałatomonet!',
+      startRain: '🌧️ Deszcz sałat (5min)',
+      rainActive: '🌧️ DESZCZ SAŁAT 🌧️',
+      rainBoost: '🌧️ Deszcz! Sałaty padają z nieba!',
+      eventType: 'Rodzaj eventu',
+      // === v7 ===
+      endless: 'Endless ♾️',
+      endlessDesc: 'bez limitu czasu',
+      bestEndless: 'Rekord ♾️',
+      achievements: '🏅 Odznaki',
+      achievementsTitle: 'Odznaki',
+      achievementsHint: 'Każda odznaka = +30 sałatomonet!',
+      unlocked: '✓ zdobyte',
+      locked: '🔒 nieodblokowane',
+      dailyChallenge: '🌟 Wyzwanie dnia',
+      dailyDone: '✓ Ukończone! +100 🥬',
+      dailyProgress: 'Postęp',
+      dailyReward: 'Nagroda',
+      goldSalad: '🌟 ZŁOTA SAŁATA! +10!',
+      powerupGot: 'Power-up!',
+      starShield: '⭐ Nietykalny!',
+      strawberryMag: '🍓 Magnes!',
+      bombBoom: '💣 BUM!',
+      tomatoTime: '🍅 +5s',
+      newAchievement: '🏅 Nowa odznaka!',
+      survived: 'Przetrwałeś:',
+      limitedShopBtn: '💎 SKLEP LIMITED',
+      limitedShopTitle: '💎 Limited Edition 💎',
+      limitedHint: 'Najmocniejsze klasy w grze! Bardzo limitowane.',
+      vipMasterUnlock: '💎 VIP MASTER! 💎',
+      backup: '💾 Zapisz konto',
+      restore: '📂 Wczytaj konto',
+      backupHint: 'Zapisz na komputerze żeby nie stracić postępów',
+      profile: '👤 Profil',
+      myProfile: 'Mój profil',
+      level: 'Level',
+      xp: 'XP',
+      avatarColor: 'Kolor żółwia',
+      friends: '👥 Znajomi',
+      friendsTitle: 'Znajomi',
+      myFriends: 'Moi znajomi',
+      friendRequests: 'Zaproszenia',
+      addFriend: '➕ Dodaj znajomego',
+      friendName: 'Imię znajomego',
+      send: 'Wyślij',
+      accept: '✓ Akceptuj',
+      decline: '✗ Odmów',
+      removeFriend: 'Usuń',
+      noFriends: 'Brak znajomych',
+      noRequests: 'Brak zaproszeń',
+      friendNotFound: 'Nie ma takiego konta',
+      cantAddSelf: 'Nie możesz dodać siebie',
+      alreadyFriend: 'Już jesteście znajomi',
+      requestSent: '✓ Zaproszenie wysłane!',
+      requestExists: 'Już wysłałeś zaproszenie',
+      duoFriendTitle: 'Wybierz znajomego do duo',
+      playWithFriend: 'Graj z',
+      withoutFriend: 'Graj solo (zwykłe duo)',
+      masterBadge: '🏆 MASTER',
+      masterBadgeDesc: 'Wszystkie odznaki zdobyte!',
+      noFriendsYet: 'Najpierw dodaj znajomego!'
+    },
+    fr: {
+      title: 'Les tortues', tabLogin: 'Connexion', tabRegister: 'Créer compte',
+      yourName: 'Prénom', password: 'Mot de passe', passwordAgain: 'Répéter',
+      loginBtn: 'Se connecter →', registerBtn: 'Créer →',
+      hi: 'Salut', logout: 'déco', coins: 'Saladocoins',
+      bestSolo: 'Record solo', bestDuo: 'Record duo', classesOwned: 'Classes',
+      shopBtn: '🛒 BOUTIQUE',
+      shopTitle: 'Boutique (30 classes !)',
+      backToLobby: '← Retour au lobby',
+      classHint: 'Achat unique — pour toujours !',
+      pickMode: 'Mode', solo: 'Solo', duo: 'Duo',
+      ranking: '🏆 Classement', noPlays: 'Personne',
+      buy: 'Acheter', pick: 'Choisir', selected: '✓ choisie', owned: '✓ Possédé',
+      notEnough: 'Pas assez', lobby: '← Lobby', time: 'Temps',
+      controls: 'flèches', controlsDuo: '🟢 flèches • 🟡 WASD',
+      hitRock: 'Aïe ! Caillou ! 🪨', timeUp: 'Fini !',
+      youWin: 'Bravo !', newRecord: '🏆 RECORD !', lettucesLabel: 'Salades :',
+      backingToLobby: 'Retour...', errEmpty: 'Tout remplir',
+      errBadLogin: 'Mauvais prénom/mot de passe', errExists: 'Prénom pris',
+      errPassMatch: 'Mots de passe ≠', errPassShort: 'Min 4 caractères',
+      tip: '🔒 Le mot de passe protège ton compte.',
+      adminTitle: 'Tu es admin !', startEvent: '🎉 Event 2× (5min)',
+      eventActive: '✨ EVENT 2× ✨', stopEvent: 'Arrêter',
+      makeAdmin: 'Devenir admin', adminCode: 'Code secret',
+      becomeAdmin: 'Activer', wrongCode: 'Mauvais code !',
+      eventBoost: '✨ Event ! 2× tout !',
+      filterAll: 'Toutes', currentClass: 'Classe actuelle',
+      target: 'But', combo: 'Combo', sound: '🔊', soundOff: '🔇',
+      starterGift: '🎁 Bonus de bienvenue : +50 saladocoins !',
+      startRain: '🌧️ Pluie de salades (5min)',
+      rainActive: '🌧️ PLUIE DE SALADES 🌧️',
+      rainBoost: '🌧️ Pluie ! Les salades tombent du ciel !',
+      eventType: 'Type d\'événement',
+      // === v7 ===
+      endless: 'Endless ♾️',
+      endlessDesc: 'sans limite de temps',
+      bestEndless: 'Record ♾️',
+      achievements: '🏅 Médailles',
+      achievementsTitle: 'Médailles',
+      achievementsHint: 'Chaque médaille = +30 saladocoins !',
+      unlocked: '✓ obtenue',
+      locked: '🔒 verrouillée',
+      dailyChallenge: '🌟 Défi du jour',
+      dailyDone: '✓ Terminé ! +100 🥬',
+      dailyProgress: 'Progrès',
+      dailyReward: 'Récompense',
+      goldSalad: '🌟 SALADE DORÉE ! +10 !',
+      powerupGot: 'Power-up !',
+      starShield: '⭐ Invincible !',
+      strawberryMag: '🍓 Aimant !',
+      bombBoom: '💣 BOUM !',
+      tomatoTime: '🍅 +5s',
+      newAchievement: '🏅 Nouvelle médaille !',
+      survived: 'Tu as survécu :',
+      limitedShopBtn: '💎 BOUTIQUE LIMITED',
+      limitedShopTitle: '💎 Limited Edition 💎',
+      limitedHint: 'Les classes les plus puissantes ! Très limitées.',
+      vipMasterUnlock: '💎 VIP MASTER ! 💎',
+      backup: '💾 Sauvegarder',
+      restore: '📂 Charger',
+      backupHint: 'Sauvegarde sur ton ordi pour ne rien perdre',
+      profile: '👤 Profil',
+      myProfile: 'Mon profil',
+      level: 'Niveau',
+      xp: 'XP',
+      avatarColor: 'Couleur tortue',
+      friends: '👥 Amis',
+      friendsTitle: 'Amis',
+      myFriends: 'Mes amis',
+      friendRequests: 'Invitations',
+      addFriend: '➕ Ajouter un ami',
+      friendName: 'Prénom de l\'ami',
+      send: 'Envoyer',
+      accept: '✓ Accepter',
+      decline: '✗ Refuser',
+      removeFriend: 'Retirer',
+      noFriends: 'Aucun ami',
+      noRequests: 'Aucune invitation',
+      friendNotFound: 'Compte introuvable',
+      cantAddSelf: 'Tu ne peux pas t\'ajouter',
+      alreadyFriend: 'Déjà amis',
+      requestSent: '✓ Invitation envoyée !',
+      requestExists: 'Invitation déjà envoyée',
+      duoFriendTitle: 'Choisis un ami pour duo',
+      playWithFriend: 'Jouer avec',
+      withoutFriend: 'Duo classique (sans ami)',
+      masterBadge: '🏆 MASTER',
+      masterBadgeDesc: 'Toutes les médailles obtenues !',
+      noFriendsYet: 'Ajoute d\'abord un ami !'
+    }
+  };
+
+  function hashPw(pw, salt) {
+    let h1 = 5381;
+    const s = salt + ':' + pw + ':' + salt;
+    for (let i = 0; i < s.length; i++) { h1 = ((h1 << 5) + h1) ^ s.charCodeAt(i); h1 = h1 & 0xffffffff; }
+    let h2 = 0x9e3779b9;
+    const s2 = h1.toString(16) + s + s.length;
+    for (let i = 0; i < s2.length; i++) { h2 = ((h2 << 5) + h2) ^ s2.charCodeAt(i); h2 = h2 & 0xffffffff; }
+    return (h1 >>> 0).toString(16) + ':' + (h2 >>> 0).toString(16);
+  }
+  function makeSalt() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36); }
+
+  let session = { name: '', lang: 'pl', isAdmin: false, soundOn: true };
+  let accounts = {};
+  let rankSolo = [], rankDuo = [], rankEndless = [];
+  let eventState = { active: false, endsAt: 0, type: 'double' };
+  let player = null;
+  let screen = 'auth';
+  let authMode = 'login', authError = '';
+  let adminError = '', showAdminPrompt = false;
+  let shopFilter = 'all';
+  let evtChk = null;
+  let pendingAchievements = []; // do pokazania po grze
+  let duoFriend = null; // jeśli ustawione = w duo żółty będzie miał klasę tego znajomego
+
+  // === DAILY / ACH HELPERS ===
+  function todayKey() {
+    const d = new Date();
+    return d.getFullYear() + '-' + (d.getMonth()+1) + '-' + d.getDate();
+  }
+  function getTodaysChallenge() {
+    // wybór deterministyczny per dzień (DJB2-like na stringu daty)
+    const k = todayKey();
+    let h = 5381;
+    for (let i = 0; i < k.length; i++) h = ((h << 5) + h + k.charCodeAt(i)) & 0xffffffff;
+    return DAILY_CHALLENGES[Math.abs(h) % DAILY_CHALLENGES.length];
+  }
+  function ensureDaily(p) {
+    if (!p.daily) p.daily = {};
+    const today = todayKey();
+    if (p.daily.day !== today) {
+      p.daily = { day: today, progress: 0, claimed: false };
+    }
+  }
+  function ensureAch(p) {
+    if (!p.ach) p.ach = {};
+    if (!p.stats) p.stats = { powerups: 0, gold: 0, wins: 0 };
+  }
+  function unlockAch(id) {
+    if (!player.ach) player.ach = {};
+    if (player.ach[id]) return false;
+    player.ach[id] = true;
+    player.totalEver += ACH_REWARD;
+    pendingAchievements.push(id);
+    return true;
+  }
+  function checkAchAfterAction() {
+    // Achievementy które można sprawdzić w trakcie gry / po akcji
+    const ownedKeys = Object.keys(player.owned).filter(k => player.owned[k]);
+    if (ownedKeys.length >= 5) unlockAch('collector5');
+    if (player.totalEver >= 1000) unlockAch('rich');
+    // Pierwsza klasa per rzadkość
+    const ownedRarities = new Set(ownedKeys.map(k => CLASSES[k].rarity));
+    if (ownedRarities.has('rare')) unlockAch('firstrare');
+    if (ownedRarities.has('epic')) unlockAch('firstepic');
+    if (ownedRarities.has('legendary')) unlockAch('firstlegend');
+    // Wszystkie basic
+    const allBasic = Object.keys(CLASSES).filter(k => CLASSES[k].rarity === 'basic');
+    if (allBasic.every(k => player.owned[k])) unlockAch('allbasic');
+    // Endless milestones
+    if ((player.endlessBest || 0) >= 50) unlockAch('endless50');
+    if ((player.endlessBest || 0) >= 100) unlockAch('endless100');
+    // Power-upy / gold
+    if ((player.stats?.powerups || 0) >= 10) unlockAch('powerup10');
+    if ((player.stats?.gold || 0) >= 1) unlockAch('goldsalad');
+  }
+
+  async function load() {
+    try { const r = await window.storage.get(SESSION_KEY); if (r && r.value) Object.assign(session, JSON.parse(r.value)); } catch(e) {}
+    if (typeof session.soundOn !== 'boolean') session.soundOn = true;
+    try { const r = await window.storage.get(ACCOUNTS_KEY, true); if (r && r.value) accounts = JSON.parse(r.value); } catch(e) {}
+    try { const r = await window.storage.get(RANK_SOLO_KEY, true); if (r && r.value) rankSolo = JSON.parse(r.value); } catch(e) {}
+    try { const r = await window.storage.get(RANK_DUO_KEY, true); if (r && r.value) rankDuo = JSON.parse(r.value); } catch(e) {}
+    try { const r = await window.storage.get(RANK_ENDLESS_KEY, true); if (r && r.value) rankEndless = JSON.parse(r.value); } catch(e) {}
+    try { const r = await window.storage.get(EVENT_KEY, true); if (r && r.value) eventState = JSON.parse(r.value); } catch(e) {}
+    if (!eventState.type) eventState.type = 'double';
+    if (session.name && accounts[session.name.toLowerCase()]) {
+      player = accounts[session.name.toLowerCase()];
+      if (!player.owned) player.owned = {};
+      if (!player.owned.normal) player.owned.normal = true;
+      if (!player.selectedClass) player.selectedClass = 'normal';
+      if (typeof player.endlessBest !== 'number') player.endlessBest = 0;
+      if (typeof player.totalEverEaten !== 'number') player.totalEverEaten = player.totalEver || 0;
+      if (!player.avatar) player.avatar = 'green';
+      if (!player.friends) player.friends = [];
+      if (!player.friendRequests) player.friendRequests = [];
+      ensureDaily(player);
+      ensureAch(player);
+      screen = 'lobby';
+    }
+    if (evtChk) clearInterval(evtChk);
+    evtChk = setInterval(() => {
+      if (eventState.active && Date.now() > eventState.endsAt) {
+        eventState.active = false; saveEvent();
+        if (screen === 'lobby' || screen === 'shop') render();
+      } else if (eventState.active && (screen === 'lobby' || screen === 'shop')) {
+        const el = document.getElementById('eTimer');
+        if (el) el.textContent = fmt(Math.max(0, eventState.endsAt - Date.now()));
+      }
+    }, 1000);
+    render();
+  }
+  async function saveAccounts() { try { await window.storage.set(ACCOUNTS_KEY, JSON.stringify(accounts), true); } catch(e) {} }
+  async function saveSession() { try { await window.storage.set(SESSION_KEY, JSON.stringify(session)); } catch(e) {} }
+  async function saveRankings() {
+    try {
+      await window.storage.set(RANK_SOLO_KEY, JSON.stringify(rankSolo), true);
+      await window.storage.set(RANK_DUO_KEY, JSON.stringify(rankDuo), true);
+      await window.storage.set(RANK_ENDLESS_KEY, JSON.stringify(rankEndless), true);
+    } catch(e) {}
+  }
+  async function saveEvent() { try { await window.storage.set(EVENT_KEY, JSON.stringify(eventState), true); } catch(e) {} }
+  async function savePlayer() { if (!player) return; accounts[player.name.toLowerCase()] = player; await saveAccounts(); }
+
+  function t() { return T_LANG[session.lang]; }
+  function lang() { return session.lang; }
+  function isEventActive() {
+    if (!eventState.active) return false;
+    if (Date.now() > eventState.endsAt) { eventState.active = false; saveEvent(); return false; }
+    return true;
+  }
+  function fmt(ms) { const s = Math.ceil(ms/1000); return Math.floor(s/60)+':'+(s%60<10?'0':'')+(s%60); }
+
+  function addToRank(arr, name, score, vipBadge) {
+    const e = arr.find(x => x.name.toLowerCase() === name.toLowerCase());
+    if (e) {
+      e.name = name;
+      if (score > e.score) e.score = score;
+      if (vipBadge) e.vipBadge = vipBadge;
+    } else {
+      arr.push({ name, score, vipBadge: vipBadge || null });
+    }
+    arr.sort((a, b) => b.score - a.score);
+    return arr.slice(0, 10);
+  }
+
+  function getVipBadge(p) {
+    if (!p || !p.owned) return null;
+    if (p.owned.zolwiomly_bogacz) return '💎';
+    if (p.owned.gvip_limited) return '👑';
+    if (p.owned.svip_limited) return '💠';
+    if (p.owned.vip_limited) return '🥇';
+    return null;
+  }
+
+  async function endGame(mode, score1, score2, extra) {
+    extra = extra || {};
+    // W endless wynikiem są sekundy przetrwania, ale sałaty dają monety
+    const survivedSec = extra.elapsedSec || 0;
+    const finalScore = mode === 'endless' ? survivedSec : score1;
+    // Monety: zjedzone sałaty (score1+score2 dla solo/duo, score1 dla endless)
+    const coinsGained = score1 + score2;
+    player.totalEver += coinsGained;
+    player.totalEverEaten = (player.totalEverEaten || 0) + coinsGained;
+    ensureAch(player);
+    ensureDaily(player);
+
+    // Update statystyk z rundy
+    if (extra.powerupsCollected) player.stats.powerups += extra.powerupsCollected;
+    if (extra.goldEaten) player.stats.gold += extra.goldEaten;
+    if (extra.maxCombo3) {
+      if (extra.maxCombo3 >= 1) unlockAch('combo3');
+      if (extra.maxCombo3 >= 1 && extra.maxCombo5 >= 1) unlockAch('combo5');
+    }
+
+    const challenge = getTodaysChallenge();
+    let dailyDelta = 0;
+
+    if (mode === 'solo') {
+      if (score1 > player.soloBest) player.soloBest = score1;
+      rankSolo = addToRank(rankSolo, player.name, player.soloBest, getVipBadge(player));
+      if (score1 >= 10) {
+        player.stats.wins = (player.stats.wins || 0) + 1;
+        unlockAch('first_win');
+      }
+      if (score1 >= 10 && extra.noHits) unlockAch('pacifist');
+      if (extra.speedrun) unlockAch('speedrun');
+      if (challenge.type === 'score_solo' && score1 > 0) {
+        if (score1 >= challenge.target) dailyDelta = challenge.target;
+        else dailyDelta = score1;
+      }
+      if (challenge.type === 'wins_solo' && score1 >= 10) dailyDelta = 1;
+    } else if (mode === 'duo') {
+      const best = Math.max(score1, score2);
+      if (best > player.duoBest) player.duoBest = best;
+      rankDuo = addToRank(rankDuo, player.name, player.duoBest, getVipBadge(player));
+    } else if (mode === 'endless') {
+      // W endless: rekord = sekundy przetrwania
+      if (survivedSec > (player.endlessBest || 0)) player.endlessBest = survivedSec;
+      rankEndless = addToRank(rankEndless, player.name, player.endlessBest, getVipBadge(player));
+      if (challenge.type === 'endless') dailyDelta = survivedSec;
+    }
+
+    if (challenge.type === 'combo' && extra.combo3Count) dailyDelta = extra.combo3Count;
+    if (challenge.type === 'powerups' && extra.powerupsCollected) dailyDelta = extra.powerupsCollected;
+    if (challenge.type === 'gold' && extra.goldEaten) dailyDelta = extra.goldEaten;
+
+    if (!player.daily.claimed) {
+      if (challenge.type === 'score_solo' || challenge.type === 'endless') {
+        if (dailyDelta > player.daily.progress) player.daily.progress = dailyDelta;
+      } else {
+        player.daily.progress += dailyDelta;
+      }
+      if (player.daily.progress >= challenge.target) {
+        player.daily.progress = challenge.target;
+        player.daily.claimed = true;
+        player.totalEver += DAILY_REWARD;
+      }
+    }
+
+    checkAchAfterAction();
+    await savePlayer(); await saveRankings();
+    screen = 'lobby'; render();
+  }
+
+  async function buyClass(key) {
+    const c = CLASSES[key]; if (!c || player.owned[key]) return;
+    const price = c.customPrice || RARITY[c.rarity].price;
+    if (player.totalEver < price) return;
+    player.totalEver -= price;
+    player.owned[key] = true;
+    player.selectedClass = key;
+    checkAchAfterAction();
+    checkVipMaster();
+    await savePlayer(); render();
+  }
+
+  function checkVipMaster() {
+    const limited = ['vip_limited', 'svip_limited', 'gvip_limited', 'zolwiomly_bogacz'];
+    if (limited.every(k => player.owned[k])) unlockAch('vipmaster');
+  }
+
+  async function setLang(l) { session.lang = l; await saveSession(); render(); }
+  async function logout() {
+    if (evtChk) { clearInterval(evtChk); evtChk = null; }
+    session.name = ''; player = null;
+    screen = 'auth'; authMode = 'login'; authError = '';
+    await saveSession(); render();
+  }
+  async function tryRegister(name, pw, pw2) {
+    if (!name || !pw) { authError = t().errEmpty; render(); return; }
+    if (pw.length < 4) { authError = t().errPassShort; render(); return; }
+    if (pw !== pw2) { authError = t().errPassMatch; render(); return; }
+    const key = name.toLowerCase();
+    if (accounts[key]) { authError = t().errExists; render(); return; }
+    const salt = makeSalt();
+    accounts[key] = {
+      name, salt, pwHash: hashPw(pw, salt),
+      totalEver: 50, totalEverEaten: 0,
+      soloBest: 0, duoBest: 0, endlessBest: 0,
+      owned: { normal: true }, selectedClass: 'normal',
+      starterShown: false,
+      ach: {}, stats: { powerups: 0, gold: 0, wins: 0 },
+      daily: { day: todayKey(), progress: 0, claimed: false },
+      avatar: 'green',
+      friends: [],
+      friendRequests: []
+    };
+    await saveAccounts();
+    player = accounts[key];
+    session.name = player.name;
+    await saveSession();
+    authError = ''; screen = 'lobby'; render();
+  }
+  async function tryLogin(name, pw) {
+    if (!name || !pw) { authError = t().errEmpty; render(); return; }
+    const a = accounts[name.toLowerCase()];
+    if (!a) { authError = t().errBadLogin; render(); return; }
+    if (hashPw(pw, a.salt) !== a.pwHash) { authError = t().errBadLogin; render(); return; }
+    if (!a.owned) a.owned = { normal: true };
+    if (!a.selectedClass) a.selectedClass = 'normal';
+    if (typeof a.endlessBest !== 'number') a.endlessBest = 0;
+    if (typeof a.totalEverEaten !== 'number') a.totalEverEaten = a.totalEver || 0;
+    if (!a.avatar) a.avatar = 'green';
+    if (!a.friends) a.friends = [];
+    if (!a.friendRequests) a.friendRequests = [];
+    ensureDaily(a);
+    ensureAch(a);
+    player = a; session.name = player.name;
+    await saveSession();
+    authError = ''; screen = 'lobby'; render();
+  }
+  async function tryBecomeAdmin(code) {
+    if (code === ADMIN_CODE) { session.isAdmin = true; adminError = ''; showAdminPrompt = false; await saveSession(); render(); }
+    else { adminError = t().wrongCode; render(); }
+  }
+
+  // === FRIENDS SYSTEM ===
+  // friends: tablica nazw [string]
+  // friendRequests: tablica zaproszeń od innych [string] (czekają na akceptację)
+
+  async function sendFriendRequest(targetName) {
+    const target = accounts[targetName.toLowerCase()];
+    if (!target) return { ok: false, msg: t().friendNotFound };
+    if (target.name.toLowerCase() === player.name.toLowerCase()) return { ok: false, msg: t().cantAddSelf };
+    // Sprawdź czy już są znajomymi
+    if (player.friends.some(f => f.toLowerCase() === target.name.toLowerCase())) {
+      return { ok: false, msg: t().alreadyFriend };
+    }
+    // Sprawdź czy już jest pending
+    if (!target.friendRequests) target.friendRequests = [];
+    if (target.friendRequests.some(r => r.toLowerCase() === player.name.toLowerCase())) {
+      return { ok: false, msg: t().requestExists };
+    }
+    // Dodaj zaproszenie do cudzego konta
+    target.friendRequests.push(player.name);
+    accounts[target.name.toLowerCase()] = target;
+    await saveAccounts();
+    return { ok: true, msg: t().requestSent };
+  }
+
+  async function acceptFriendRequest(fromName) {
+    if (!player.friendRequests) player.friendRequests = [];
+    const idx = player.friendRequests.findIndex(r => r.toLowerCase() === fromName.toLowerCase());
+    if (idx < 0) return;
+    const from = accounts[fromName.toLowerCase()];
+    if (!from) {
+      // konto zniknęło - usuń zaproszenie
+      player.friendRequests.splice(idx, 1);
+      await savePlayer();
+      return;
+    }
+    // Usuń z requests, dodaj do friends u obu graczy
+    player.friendRequests.splice(idx, 1);
+    if (!player.friends.some(f => f.toLowerCase() === from.name.toLowerCase())) {
+      player.friends.push(from.name);
+    }
+    if (!from.friends) from.friends = [];
+    if (!from.friends.some(f => f.toLowerCase() === player.name.toLowerCase())) {
+      from.friends.push(player.name);
+    }
+    accounts[from.name.toLowerCase()] = from;
+    await saveAccounts();
+    await savePlayer();
+  }
+
+  async function declineFriendRequest(fromName) {
+    if (!player.friendRequests) player.friendRequests = [];
+    const idx = player.friendRequests.findIndex(r => r.toLowerCase() === fromName.toLowerCase());
+    if (idx < 0) return;
+    player.friendRequests.splice(idx, 1);
+    await savePlayer();
+  }
+
+  async function removeFriend(friendName) {
+    if (!confirm((lang() === 'pl' ? 'Usunąć ' : 'Retirer ') + friendName + '?')) return;
+    if (!player.friends) player.friends = [];
+    player.friends = player.friends.filter(f => f.toLowerCase() !== friendName.toLowerCase());
+    const friend = accounts[friendName.toLowerCase()];
+    if (friend && friend.friends) {
+      friend.friends = friend.friends.filter(f => f.toLowerCase() !== player.name.toLowerCase());
+      accounts[friend.name.toLowerCase()] = friend;
+    }
+    await saveAccounts();
+    await savePlayer();
+    render();
+  }
+
+  function hasMasterBadge(p) {
+    if (!p || !p.ach) return false;
+    return ACHIEVEMENTS.every(a => p.ach[a.id]);
+  }
+
+  // === AVATAR SVG — żółwik na profil, jako reprezentacja gracza ===
+  function avatarSvg(avatarId, size) {
+    size = size || 80;
+    const preset = AVATAR_PRESETS.find(p => p.id === avatarId) || AVATAR_PRESETS[0];
+    let shell, inner, skin;
+    if (preset.shell === 'rainbow') {
+      // Rainbow - gradient ID unikalny per render
+      const gid = 'rng' + Math.random().toString(36).slice(2, 8);
+      return `<svg width="${size}" height="${size}" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="${gid}" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#FF0000"/>
+            <stop offset="20%" stop-color="#FF8800"/>
+            <stop offset="40%" stop-color="#FFEE00"/>
+            <stop offset="60%" stop-color="#00CC44"/>
+            <stop offset="80%" stop-color="#0088FF"/>
+            <stop offset="100%" stop-color="#9933FF"/>
+          </linearGradient>
+        </defs>
+        <ellipse cx="50" cy="80" rx="35" ry="6" fill="rgba(0,0,0,0.15)"/>
+        <circle cx="30" cy="35" r="8" fill="#FFB347"/>
+        <circle cx="70" cy="35" r="8" fill="#FFB347"/>
+        <circle cx="30" cy="65" r="8" fill="#FFB347"/>
+        <circle cx="70" cy="65" r="8" fill="#FFB347"/>
+        <circle cx="50" cy="50" r="28" fill="url(#${gid})"/>
+        <circle cx="50" cy="50" r="22" fill="url(#${gid})" opacity="0.7"/>
+        <circle cx="78" cy="50" r="11" fill="#FFB347"/>
+        <circle cx="84" cy="47" r="2" fill="#000"/>
+      </svg>`;
+    }
+    shell = preset.shell;
+    inner = preset.inner;
+    skin = preset.skin;
+    return `<svg width="${size}" height="${size}" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+      <ellipse cx="50" cy="80" rx="35" ry="6" fill="rgba(0,0,0,0.15)"/>
+      <circle cx="30" cy="35" r="8" fill="${skin}"/>
+      <circle cx="70" cy="35" r="8" fill="${skin}"/>
+      <circle cx="30" cy="65" r="8" fill="${skin}"/>
+      <circle cx="70" cy="65" r="8" fill="${skin}"/>
+      <circle cx="50" cy="50" r="28" fill="${shell}"/>
+      <circle cx="50" cy="50" r="22" fill="${inner}"/>
+      <circle cx="42" cy="42" r="4" fill="${shell}"/>
+      <circle cx="58" cy="42" r="4" fill="${shell}"/>
+      <circle cx="42" cy="58" r="4" fill="${shell}"/>
+      <circle cx="58" cy="58" r="4" fill="${shell}"/>
+      <circle cx="50" cy="50" r="4" fill="${shell}"/>
+      <circle cx="78" cy="50" r="11" fill="${skin}"/>
+      <circle cx="84" cy="47" r="2" fill="#000"/>
+    </svg>`;
+  }
+
+  // === EXPORT/IMPORT konta — backup żeby nie tracić postępów ===
+  function exportAccount() {
+    if (!player) return;
+    const data = {
+      version: 'v8',
+      exportedAt: new Date().toISOString(),
+      player: player
+    };
+    const json = JSON.stringify(data, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `zolwiki_${player.name}_${todayKey()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function importAccount(file) {
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      if (!data.player || !data.player.name) {
+        alert(lang() === 'pl' ? '⚠️ To nie jest plik z konta Żółwików' : '⚠️ Ce n\'est pas un fichier de compte');
+        return;
+      }
+      const p = data.player;
+      const key = p.name.toLowerCase();
+      const exists = accounts[key];
+      const confirmMsg = exists
+        ? (lang() === 'pl' ? `Konto "${p.name}" już istnieje. Nadpisać?` : `Le compte "${p.name}" existe déjà. Écraser ?`)
+        : (lang() === 'pl' ? `Wczytać konto "${p.name}"?` : `Charger le compte "${p.name}" ?`);
+      if (!confirm(confirmMsg)) return;
+      // Zapewniamy że konto ma wszystkie wymagane pola
+      if (!p.owned) p.owned = { normal: true };
+      if (!p.selectedClass) p.selectedClass = 'normal';
+      if (typeof p.endlessBest !== 'number') p.endlessBest = 0;
+      if (typeof p.totalEver !== 'number') p.totalEver = 0;
+      if (typeof p.soloBest !== 'number') p.soloBest = 0;
+      if (typeof p.duoBest !== 'number') p.duoBest = 0;
+      if (!p.ach) p.ach = {};
+      if (!p.stats) p.stats = { powerups: 0, gold: 0, wins: 0 };
+      if (!p.daily) p.daily = { day: todayKey(), progress: 0, claimed: false };
+      accounts[key] = p;
+      await saveAccounts();
+      // Auto-zaloguj
+      player = p;
+      session.name = p.name;
+      await saveSession();
+      screen = 'lobby';
+      render();
+    } catch(e) {
+      alert(lang() === 'pl' ? '⚠️ Błąd: nieprawidłowy plik' : '⚠️ Erreur : fichier invalide');
+    }
+  }
+
+  function esc(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+  function langSwitcher() {
+    const isPl = session.lang === 'pl';
+    return `<div style="display: flex; justify-content: flex-end; margin-bottom: 8px; gap: 4px;">
+      <button data-lang="pl" style="font-size: 13px; padding: 6px 10px; ${isPl ? 'background: var(--color-background-info); border-color: var(--color-border-info); font-weight: 500;' : ''}">🇵🇱 PL</button>
+      <button data-lang="fr" style="font-size: 13px; padding: 6px 10px; ${!isPl ? 'background: var(--color-background-info); border-color: var(--color-border-info); font-weight: 500;' : ''}">🇫🇷 FR</button>
+    </div>`;
+  }
+  function bindLang() {
+    root.querySelectorAll('[data-lang]').forEach(b => b.addEventListener('click', () => setLang(b.getAttribute('data-lang'))));
+  }
+
+  function renderAuth() {
+    const isLogin = authMode === 'login';
+    root.innerHTML = `
+      ${langSwitcher()}
+      <div style="background: var(--color-background-secondary); border-radius: var(--border-radius-lg); padding: 1.5rem; max-width: 400px; margin: 0 auto;">
+        <div style="text-align: center; font-size: 48px;">🐢</div>
+        <h2 style="margin: 0 0 1rem; text-align: center;">${t().title}</h2>
+        <div style="display: flex; gap: 4px; margin-bottom: 1rem; background: var(--color-background-tertiary); border-radius: var(--border-radius-md); padding: 4px;">
+          <button data-tab="login" style="flex: 1; font-size: 14px; ${isLogin ? 'background: var(--color-background-primary); font-weight: 500;' : 'background: transparent; border: none;'}">${t().tabLogin}</button>
+          <button data-tab="register" style="flex: 1; font-size: 14px; ${!isLogin ? 'background: var(--color-background-primary); font-weight: 500;' : 'background: transparent; border: none;'}">${t().tabRegister}</button>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <input id="aN" type="text" maxlength="14" placeholder="${t().yourName}" />
+          <input id="aP" type="password" maxlength="30" placeholder="${t().password}" />
+          ${!isLogin ? `<input id="aP2" type="password" maxlength="30" placeholder="${t().passwordAgain}" />` : ''}
+          ${authError ? `<div style="font-size: 13px; color: var(--color-text-danger); padding: 4px 0;">⚠️ ${esc(authError)}</div>` : ''}
+          <button id="aB" style="margin-top: 8px; font-size: 15px; padding: 12px;">${isLogin ? t().loginBtn : t().registerBtn}</button>
+        </div>
+        <p style="font-size: 12px; color: var(--color-text-secondary); margin: 1rem 0 0; text-align: center;">${t().tip}</p>
+
+        <div style="border-top: 1px solid var(--color-border-tertiary); margin-top: 1rem; padding-top: 1rem;">
+          <input type="file" id="restoreFile" accept=".json,application/json" style="display: none;" />
+          <button id="restoreBtn" style="width: 100%; font-size: 14px; padding: 10px; background: var(--color-background-info); border: 2px solid var(--color-border-info);">${t().restore}</button>
+          <p style="font-size: 11px; color: var(--color-text-secondary); margin: 6px 0 0; text-align: center;">${t().backupHint}</p>
+        </div>
+      </div>`;
+    bindLang();
+    root.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => { authMode = b.getAttribute('data-tab'); authError = ''; render(); }));
+    const n = document.getElementById('aN'), p = document.getElementById('aP'), p2 = document.getElementById('aP2');
+    n.focus();
+    function submit() {
+      if (isLogin) tryLogin(n.value.trim(), p.value);
+      else tryRegister(n.value.trim(), p.value, p2 ? p2.value : '');
+    }
+    document.getElementById('aB').addEventListener('click', submit);
+    [n, p, p2].filter(Boolean).forEach(el => el.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); }));
+
+    const fileInput = document.getElementById('restoreFile');
+    document.getElementById('restoreBtn').addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', async e => {
+      const f = e.target.files[0];
+      if (f) await importAccount(f);
+    });
+  }
+
+  function rankList(arr, emptyMsg, suffix) {
+    suffix = suffix || '🥬';
+    if (!arr.length) return `<p style="color: var(--color-text-secondary); font-size: 13px; padding: 8px 0;">${emptyMsg}</p>`;
+    return `<ol style="list-style: none; padding: 0; margin: 0;">` +
+      arr.slice(0, 5).map((e, i) => {
+        const medal = ['🥇','🥈','🥉'][i] || `${i+1}.`;
+        const me = e.name.toLowerCase() === (player ? player.name.toLowerCase() : '');
+        const badge = e.vipBadge ? `<span style="margin-right: 3px;">${e.vipBadge}</span>` : '';
+        return `<li style="display: flex; justify-content: space-between; padding: 6px 8px; border-radius: var(--border-radius-md); background: ${me ? 'var(--color-background-info)' : 'transparent'}; margin-bottom: 2px;">
+          <span style="font-size: 14px;">${medal} ${badge}${esc(e.name)}${me ? ' (' + (lang() === 'pl' ? 'ty' : 'toi') + ')' : ''}</span>
+          <span style="font-size: 14px; font-weight: 500;">${e.score} ${suffix}</span>
+        </li>`;
+      }).join('') + `</ol>`;
+  }
+
+  function adminPanelHtml() {
+    if (!session.isAdmin) {
+      if (!showAdminPrompt) return `<button id="showAdmin" style="font-size: 11px; color: var(--color-text-secondary); background: transparent; border: none; padding: 4px;">🔑 ${t().makeAdmin}</button>`;
+      return `<div style="background: var(--color-background-secondary); border-radius: var(--border-radius-lg); padding: 1rem; margin-bottom: 1rem; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+        <input id="adminCodeInput" type="password" placeholder="${t().adminCode}" style="flex: 1; min-width: 150px;" />
+        <button id="adminSubmit" style="font-size: 13px;">${t().becomeAdmin}</button>
+        <button id="adminCancel" style="font-size: 13px;">✕</button>
+        ${adminError ? `<div style="width:100%; font-size: 12px; color: var(--color-text-danger);">⚠️ ${esc(adminError)}</div>` : ''}
+      </div>`;
+    }
+    if (isEventActive()) {
+      const isRain = eventState.type === 'rain';
+      const bg = isRain ? 'linear-gradient(90deg, #E6F1FB, #85B7EB)' : 'linear-gradient(90deg, #FAEEDA, #FAC775)';
+      const border = isRain ? '#185FA5' : '#BA7517';
+      const txtMain = isRain ? '#0C447C' : '#633806';
+      const txtSub = isRain ? '#185FA5' : '#854F0B';
+      const txtTime = isRain ? '#04223E' : '#412402';
+      const titleTxt = isRain ? t().rainActive : t().eventActive;
+      const subTxt = isRain ? t().rainBoost : t().eventBoost;
+      return `<div style="background: ${bg}; border: 2px solid ${border}; border-radius: var(--border-radius-lg); padding: 1rem; margin-bottom: 1rem; text-align: center;">
+        <div style="font-size: 16px; font-weight: 500; color: ${txtMain};">${titleTxt}</div>
+        <div style="font-size: 13px; color: ${txtSub}; margin-top: 4px;">${subTxt}</div>
+        <div style="font-size: 22px; font-weight: 500; color: ${txtTime}; margin: 8px 0;"><span id="eTimer">${fmt(Math.max(0, eventState.endsAt - Date.now()))}</span></div>
+        <button id="stopEventBtn" style="font-size: 13px;">${t().stopEvent}</button>
+      </div>`;
+    }
+    return `<div style="background: var(--color-background-warning); border: 0.5px solid var(--color-border-warning); border-radius: var(--border-radius-lg); padding: 1rem; margin-bottom: 1rem;">
+      <div style="font-size: 14px; font-weight: 500; color: var(--color-text-warning); margin-bottom: 8px;">👑 ${t().adminTitle}</div>
+      <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+        <button id="startEventBtn" style="font-size: 13px; padding: 8px 14px;">${t().startEvent}</button>
+        <button id="startRainBtn" style="font-size: 13px; padding: 8px 14px; background: #E6F1FB; border-color: #185FA5; color: #0C447C;">${t().startRain}</button>
+      </div>
+    </div>`;
+  }
+
+  function eventBanner() {
+    if (session.isAdmin || !isEventActive()) return '';
+    const isRain = eventState.type === 'rain';
+    const bg = isRain ? 'linear-gradient(90deg, #E6F1FB, #85B7EB)' : 'linear-gradient(90deg, #FAEEDA, #FAC775)';
+    const border = isRain ? '#185FA5' : '#BA7517';
+    const txtMain = isRain ? '#0C447C' : '#633806';
+    const txtSub = isRain ? '#185FA5' : '#854F0B';
+    const txtTime = isRain ? '#04223E' : '#412402';
+    const titleTxt = isRain ? t().rainActive : t().eventActive;
+    const subTxt = isRain ? t().rainBoost : t().eventBoost;
+    return `<div style="background: ${bg}; border: 2px solid ${border}; border-radius: var(--border-radius-lg); padding: 1rem; margin-bottom: 1rem; text-align: center;">
+      <div style="font-size: 16px; font-weight: 500; color: ${txtMain};">${titleTxt}</div>
+      <div style="font-size: 13px; color: ${txtSub}; margin-top: 4px;">${subTxt}</div>
+      <div style="font-size: 18px; font-weight: 500; color: ${txtTime}; margin-top: 6px;"><span id="eTimer">${fmt(Math.max(0, eventState.endsAt - Date.now()))}</span></div>
+    </div>`;
+  }
+
+  function bindAdmin() {
+    const sa = document.getElementById('showAdmin');
+    if (sa) sa.addEventListener('click', () => { showAdminPrompt = true; render(); });
+    const ax = document.getElementById('adminCancel');
+    if (ax) ax.addEventListener('click', () => { showAdminPrompt = false; adminError = ''; render(); });
+    const ag = document.getElementById('adminSubmit');
+    if (ag) {
+      const inp = document.getElementById('adminCodeInput');
+      const submit = () => tryBecomeAdmin(inp.value);
+      ag.addEventListener('click', submit);
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+      inp.focus();
+    }
+    const sb = document.getElementById('startEventBtn');
+    if (sb) sb.addEventListener('click', async () => { eventState = { active: true, endsAt: Date.now() + EVENT_DURATION, type: 'double' }; await saveEvent(); render(); });
+    const rb = document.getElementById('startRainBtn');
+    if (rb) rb.addEventListener('click', async () => { eventState = { active: true, endsAt: Date.now() + EVENT_DURATION, type: 'rain' }; await saveEvent(); render(); });
+    const eb = document.getElementById('stopEventBtn');
+    if (eb) eb.addEventListener('click', async () => { eventState = { active: false, endsAt: 0, type: 'double' }; await saveEvent(); render(); });
+  }
+
+  function dailyHtml() {
+    ensureDaily(player);
+    const ch = getTodaysChallenge();
+    const pct = Math.min(100, Math.round((player.daily.progress / ch.target) * 100));
+    const done = player.daily.claimed;
+    return `<div style="background: ${done ? 'linear-gradient(90deg, #FAEEDA, #FAC775)' : 'var(--color-background-secondary)'}; border: 2px solid ${done ? '#BA7517' : 'var(--color-border-tertiary)'}; border-radius: var(--border-radius-lg); padding: 12px; margin-bottom: 1rem;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+        <div style="font-size: 14px; font-weight: 500; color: ${done ? '#412402' : 'var(--color-text-primary)'};">${t().dailyChallenge}: ${ch.names[lang()]}</div>
+        <div style="font-size: 12px; color: ${done ? '#633806' : 'var(--color-text-secondary)'};">${done ? t().dailyDone : `${player.daily.progress}/${ch.target}`}</div>
+      </div>
+      <div style="background: rgba(0,0,0,0.1); border-radius: 4px; height: 6px; overflow: hidden;">
+        <div style="background: ${done ? '#BA7517' : '#3B6D11'}; height: 100%; width: ${pct}%; transition: width 0.3s;"></div>
+      </div>
+    </div>`;
+  }
+
+  function pendingAchHtml() {
+    if (!pendingAchievements.length) return '';
+    const items = pendingAchievements.map(id => {
+      const ach = ACHIEVEMENTS.find(a => a.id === id);
+      return ach ? `<div style="display: inline-block; background: white; border: 2px solid #BA7517; border-radius: 8px; padding: 6px 10px; margin: 2px; font-size: 13px;">${ach.emoji} ${ach.names[lang()]}</div>` : '';
+    }).join('');
+    return `<div style="background: linear-gradient(90deg, #FAEEDA, #FAC775); border: 2px solid #BA7517; border-radius: var(--border-radius-lg); padding: 12px; margin-bottom: 1rem; text-align: center;">
+      <div style="font-size: 14px; font-weight: 500; color: #412402; margin-bottom: 6px;">${t().newAchievement}</div>
+      ${items}
+      <div style="font-size: 12px; color: #633806; margin-top: 6px;">+${ACH_REWARD * pendingAchievements.length} 🥬</div>
+    </div>`;
+  }
+
+  function renderLobby() {
+    const cls = player.selectedClass;
+    const c = CLASSES[cls];
+    const ownedCount = Object.keys(player.owned).filter(k => player.owned[k]).length;
+    const achCount = player.ach ? Object.keys(player.ach).filter(k => player.ach[k]).length : 0;
+    const showStarter = !player.starterShown;
+    if (showStarter) { player.starterShown = true; savePlayer(); }
+    // Snapshot pending and clear (next render won't show)
+    const achHtml = pendingAchHtml();
+    if (pendingAchievements.length) pendingAchievements = [];
+    root.innerHTML = `
+      ${langSwitcher()}
+      <div style="text-align: center; margin-bottom: 1.5rem;">
+        <div style="font-size: 36px;">🐢</div>
+        <h2 style="margin: 4px 0 0;">${t().hi} ${esc(player.name)}${session.isAdmin ? ' 👑' : ''}!</h2>
+        <div style="display: flex; gap: 6px; justify-content: center; margin-top: 6px; flex-wrap: wrap;">
+          <button id="logoutBtn" style="font-size: 12px;">${t().logout}</button>
+          <button id="backupBtn" style="font-size: 12px;" title="${t().backupHint}">${t().backup}</button>
+        </div>
+      </div>
+
+      ${achHtml}
+      ${showStarter ? `<div style="background: linear-gradient(90deg, #FAEEDA, #FAC775); border: 2px solid #BA7517; border-radius: var(--border-radius-lg); padding: 12px; margin-bottom: 1rem; text-align: center; font-size: 14px; color: #412402; font-weight: 500;">${t().starterGift}</div>` : ''}
+
+      ${adminPanelHtml()}
+      ${eventBanner()}
+      ${dailyHtml()}
+
+      <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 1.5rem;">
+        <button id="openProfile" style="padding: 0.75rem 0.5rem; font-size: 13px; font-weight: 500; background: var(--color-background-secondary); border: 2px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); cursor: pointer; position: relative;">
+          ${avatarSvg(player.avatar || 'green', 32)}
+          <div style="font-size: 10px; font-weight: 400; margin-top: 4px;">${t().profile}</div>
+          ${(player.friendRequests || []).length > 0 ? `<div style="position: absolute; top: 4px; right: 4px; background: #C75A5A; color: white; border-radius: 50%; width: 18px; height: 18px; font-size: 10px; display: flex; align-items: center; justify-content: center;">${player.friendRequests.length}</div>` : ''}
+        </button>
+        <button id="openShop" style="padding: 0.75rem 0.5rem; font-size: 13px; font-weight: 500; background: linear-gradient(90deg, #FAEEDA, #FAC775); border: 2px solid #BA7517; border-radius: var(--border-radius-lg); color: #412402; cursor: pointer;">
+          🛒
+          <div style="font-size: 10px; font-weight: 400; margin-top: 4px; color: #633806;">${ownedCount}/${Object.keys(CLASSES).length}</div>
+        </button>
+        <button id="openLimited" class="zw-limited-btn" style="padding: 0.75rem 0.5rem; font-size: 13px; font-weight: 500; background: linear-gradient(90deg, #FAC775, #E84A6F, #7A1A8C); background-size: 200% 100%; border: 2px solid #7A1A8C; border-radius: var(--border-radius-lg); color: white; cursor: pointer; box-shadow: 0 2px 12px rgba(122, 26, 140, 0.3); text-shadow: 0 1px 2px rgba(0,0,0,0.3);">
+          💎
+          <div style="font-size: 10px; font-weight: 400; margin-top: 4px; opacity: 0.95;">${Object.keys(player.owned).filter(k => CLASSES[k] && CLASSES[k].rarity === 'limited' && player.owned[k]).length}/4</div>
+        </button>
+        <button id="openAch" style="padding: 0.75rem 0.5rem; font-size: 13px; font-weight: 500; background: var(--color-background-info); border: 2px solid var(--color-border-info); border-radius: var(--border-radius-lg); cursor: pointer;">
+          🏅
+          <div style="font-size: 10px; font-weight: 400; margin-top: 4px;">${achCount}/${ACHIEVEMENTS.length}</div>
+        </button>
+      </div>
+      <style>
+        @keyframes zwShimmerBtn { 0% { background-position: 0% 50%; } 100% { background-position: 200% 50%; } }
+        .zw-limited-btn { animation: zwShimmerBtn 4s linear infinite; }
+      </style>
+
+      <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 1.5rem;">
+        <div style="background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 0.75rem; text-align: center;">
+          <div style="font-size: 11px; color: var(--color-text-secondary);">${t().coins} 🥬</div>
+          <div style="font-size: 20px; font-weight: 500;">${player.totalEver}</div>
+        </div>
+        <div style="background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 0.75rem; text-align: center;">
+          <div style="font-size: 11px; color: var(--color-text-secondary);">${t().bestSolo}</div>
+          <div style="font-size: 20px; font-weight: 500;">${player.soloBest}</div>
+        </div>
+        <div style="background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 0.75rem; text-align: center;">
+          <div style="font-size: 11px; color: var(--color-text-secondary);">${t().bestDuo}</div>
+          <div style="font-size: 20px; font-weight: 500;">${player.duoBest}</div>
+        </div>
+        <div style="background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 0.75rem; text-align: center;">
+          <div style="font-size: 11px; color: var(--color-text-secondary);">${t().bestEndless}</div>
+          <div style="font-size: 20px; font-weight: 500;">${player.endlessBest || 0}s</div>
+        </div>
+      </div>
+
+      <div style="background: ${RARITY[c.rarity].bg}; border: 2px solid ${RARITY[c.rarity].dark}; border-radius: var(--border-radius-lg); padding: 1rem; margin-bottom: 1.5rem; display: flex; align-items: center; gap: 12px;">
+        <div style="font-size: 40px;">${c.emoji}</div>
+        <div style="flex: 1;">
+          <div style="font-size: 11px; color: ${RARITY[c.rarity].dark}; opacity: 0.7;">${t().currentClass}</div>
+          <div style="font-size: 18px; font-weight: 500; color: ${RARITY[c.rarity].dark};">${c.names[lang()]}</div>
+          <div style="font-size: 12px; color: ${RARITY[c.rarity].dark};">${c.descs[lang()]}</div>
+        </div>
+      </div>
+
+      <h3 style="margin: 0 0 14px;">${t().pickMode}</h3>
+      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 2rem;">
+        <button id="playSolo" style="padding: 1.5rem 0.5rem; font-size: 16px; font-weight: 500; background: var(--color-background-info); border: 2px solid var(--color-border-info); border-radius: var(--border-radius-lg);">
+          <div style="font-size: 40px; line-height: 1; margin-bottom: 6px;">${c.emoji}</div>
+          <div>${t().solo}</div>
+        </button>
+        <button id="playDuo" style="padding: 1.5rem 0.5rem; font-size: 16px; font-weight: 500; background: var(--color-background-success); border: 2px solid var(--color-border-success); border-radius: var(--border-radius-lg);">
+          <div style="font-size: 40px; line-height: 1; margin-bottom: 6px;">🐢🐢</div>
+          <div>${t().duo}</div>
+        </button>
+        <button id="playEndless" style="padding: 1.5rem 0.5rem; font-size: 16px; font-weight: 500; background: linear-gradient(135deg, #EEEDFE, #AFA9EC); border: 2px solid #534AB7; border-radius: var(--border-radius-lg); color: #2A2370;">
+          <div style="font-size: 40px; line-height: 1; margin-bottom: 6px;">♾️</div>
+          <div>${t().endless}</div>
+        </button>
+      </div>
+
+      <h3 style="margin: 0 0 12px;">${t().ranking}</h3>
+      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
+        <div style="background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); padding: 0.75rem;">
+          <h4 style="margin: 0 0 8px; font-size: 13px; font-weight: 500;">${t().solo}</h4>
+          ${rankList(rankSolo, t().noPlays)}
+        </div>
+        <div style="background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); padding: 0.75rem;">
+          <h4 style="margin: 0 0 8px; font-size: 13px; font-weight: 500;">${t().duo}</h4>
+          ${rankList(rankDuo, t().noPlays)}
+        </div>
+        <div style="background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); padding: 0.75rem;">
+          <h4 style="margin: 0 0 8px; font-size: 13px; font-weight: 500;">♾️</h4>
+          ${rankList(rankEndless, t().noPlays, 's')}
+        </div>
+      </div>`;
+    bindLang();
+    document.getElementById('logoutBtn').addEventListener('click', logout);
+    document.getElementById('backupBtn').addEventListener('click', exportAccount);
+    document.getElementById('openShop').addEventListener('click', () => { screen = 'shop'; shopFilter = 'all'; render(); });
+    document.getElementById('openProfile').addEventListener('click', () => { screen = 'profile'; render(); });
+    document.getElementById('openLimited').addEventListener('click', () => { screen = 'limited'; render(); });
+    document.getElementById('openAch').addEventListener('click', () => { screen = 'ach'; render(); });
+    document.getElementById('playSolo').addEventListener('click', () => { screen = 'solo'; render(); });
+    document.getElementById('playDuo').addEventListener('click', () => {
+      duoFriend = null;
+      // Jeśli ma znajomych - daj wybrać; jak nie ma to gra po prostu solo z drugim graczem na klawiaturze
+      if ((player.friends || []).length > 0) {
+        screen = 'duoChoose';
+      } else {
+        screen = 'duo';
+      }
+      render();
+    });
+    document.getElementById('playEndless').addEventListener('click', () => { screen = 'endless'; render(); });
+    bindAdmin();
+  }
+
+  function classCard(key) {
+    const c = CLASSES[key];
+    const r = RARITY[c.rarity];
+    const owned = player.owned[key];
+    const selected = player.selectedClass === key;
+    const price = c.customPrice || r.price;
+    const canAfford = player.totalEver >= price;
+    const border = selected ? `3px solid ${r.dark}` : `2px solid ${r.color}`;
+    const className = c.names[lang()];
+    const classDesc = c.descs[lang()];
+
+    // CENA / STATUS - zawsze widoczne
+    let priceTag = '';
+    if (owned) {
+      priceTag = `<div style="background: ${r.dark}; color: white; padding: 6px 10px; border-radius: var(--border-radius-md); font-size: 12px; font-weight: 500; margin-top: 8px; text-align: center;">${selected ? t().selected : t().owned}</div>`;
+    } else {
+      priceTag = `<div style="background: ${canAfford ? r.color : '#D3D1C7'}; color: ${canAfford ? r.dark : '#5F5E5A'}; padding: 6px 10px; border-radius: var(--border-radius-md); font-size: 14px; font-weight: 500; margin-top: 8px; text-align: center;">${price} 🥬</div>`;
+    }
+
+    let action = '';
+    if (owned && !selected) {
+      action = `<button data-select="${key}" style="font-size: 12px; margin-top: 6px; width: 100%; padding: 6px;">${t().pick}</button>`;
+    } else if (!owned) {
+      action = `<button data-buy="${key}" ${!canAfford ? 'disabled' : ''} style="font-size: 12px; margin-top: 6px; width: 100%; padding: 6px; ${!canAfford ? 'opacity:0.5;' : `background: ${r.color}; border-color: ${r.dark}; color: ${r.dark}; font-weight: 500;`}">${canAfford ? t().buy : t().notEnough}</button>`;
+    }
+
+    return `
+      <div style="background: ${r.bg}; border: ${border}; border-radius: var(--border-radius-lg); padding: 10px; text-align: center; position: relative; display: flex; flex-direction: column;">
+        <div style="position: absolute; top: 6px; right: 8px; font-size: 9px; color: ${r.dark}; font-weight: 500; background: rgba(255,255,255,0.5); padding: 2px 6px; border-radius: 4px;">${r.names[lang()]}</div>
+        <div style="font-size: 32px; line-height: 1; margin-top: 14px;">${c.emoji}</div>
+        <div style="font-size: 14px; font-weight: 500; margin-top: 6px; color: ${r.dark};">${className}</div>
+        <div style="font-size: 11px; color: ${r.dark}; opacity: 0.85; margin-top: 4px; min-height: 28px; line-height: 1.3;">${classDesc}</div>
+        ${priceTag}
+        ${action}
+      </div>`;
+  }
+
+  function renderShop() {
+    // LIMITED nie pokazuje się tutaj — ma osobny sklep
+    const keys = Object.keys(CLASSES).filter(k => CLASSES[k].rarity !== 'limited');
+    let filtered = keys;
+    if (shopFilter !== 'all') filtered = keys.filter(k => CLASSES[k].rarity === shopFilter);
+    const filters = [
+      { key: 'all', label: t().filterAll, color: '#888780', dark: '#444441' },
+      { key: 'basic', label: RARITY.basic.names[lang()] + ' (100)', color: RARITY.basic.color, dark: RARITY.basic.dark },
+      { key: 'rare', label: RARITY.rare.names[lang()] + ' (150)', color: RARITY.rare.color, dark: RARITY.rare.dark },
+      { key: 'epic', label: RARITY.epic.names[lang()] + ' (200)', color: RARITY.epic.color, dark: RARITY.epic.dark },
+      { key: 'legendary', label: RARITY.legendary.names[lang()] + ' (300)', color: RARITY.legendary.color, dark: RARITY.legendary.dark }
+    ];
+    root.innerHTML = `
+      ${langSwitcher()}
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; gap: 12px;">
+        <button id="backLobby" style="font-size: 14px; padding: 10px 16px; font-weight: 500;">${t().backToLobby}</button>
+        <div style="background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 8px 14px; font-weight: 500;">
+          🥬 ${player.totalEver}
+        </div>
+      </div>
+
+      <h2 style="margin: 0 0 8px; text-align: center;">🛒 ${t().shopTitle}</h2>
+      <p style="font-size: 13px; color: var(--color-text-secondary); text-align: center; margin: 0 0 1.5rem;">${t().classHint}</p>
+
+      <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 1.5rem; justify-content: center;">
+        ${filters.map(f => `<button data-filter="${f.key}" style="font-size: 13px; padding: 8px 14px; font-weight: 500; ${shopFilter === f.key ? `background: ${f.dark}; color: white; border-color: ${f.dark};` : `background: ${f.color === '#888780' ? 'transparent' : f.color}; color: ${f.dark}; border-color: ${f.dark};`}">${f.label}</button>`).join('')}
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 1rem;">
+        ${filtered.map(classCard).join('')}
+      </div>
+
+      <div style="text-align: center; margin-top: 2rem;">
+        <button id="backLobby2" style="font-size: 14px; padding: 12px 24px; font-weight: 500;">${t().backToLobby}</button>
+      </div>`;
+    bindLang();
+    document.getElementById('backLobby').addEventListener('click', () => { screen = 'lobby'; render(); });
+    document.getElementById('backLobby2').addEventListener('click', () => { screen = 'lobby'; render(); });
+    root.querySelectorAll('[data-buy]').forEach(b => b.addEventListener('click', () => buyClass(b.getAttribute('data-buy'))));
+    root.querySelectorAll('[data-select]').forEach(b => {
+      b.addEventListener('click', async () => { player.selectedClass = b.getAttribute('data-select'); await savePlayer(); render(); });
+    });
+    root.querySelectorAll('[data-filter]').forEach(b => {
+      b.addEventListener('click', () => { shopFilter = b.getAttribute('data-filter'); render(); });
+    });
+  }
+
+  function limitedClassCard(key) {
+    const c = CLASSES[key];
+    const owned = player.owned[key];
+    const selected = player.selectedClass === key;
+    const price = c.customPrice;
+    const canAfford = player.totalEver >= price;
+    // Każda LIMITED ma swój kolor akcentu
+    const accents = {
+      vip_limited:      { from: '#FAC775', to: '#BA7517', txt: '#412402', glow: '#FAC775' },
+      svip_limited:     { from: '#85B7EB', to: '#185FA5', txt: '#04223E', glow: '#85B7EB' },
+      gvip_limited:     { from: '#AFA9EC', to: '#534AB7', txt: '#1A1356', glow: '#AFA9EC' },
+      zolwiomly_bogacz: { from: '#FAC775', to: '#7A1A8C', txt: '#FFFFFF', glow: '#E84A6F' }
+    };
+    const acc = accents[key] || accents.vip_limited;
+
+    let priceTag, action;
+    if (owned) {
+      priceTag = `<div style="background: ${acc.to}; color: white; padding: 6px 10px; border-radius: var(--border-radius-md); font-size: 13px; font-weight: 500; margin-top: 8px; text-align: center;">${selected ? t().selected : t().owned}</div>`;
+    } else {
+      priceTag = `<div style="background: ${canAfford ? `linear-gradient(90deg, ${acc.from}, ${acc.to})` : '#D3D1C7'}; color: ${canAfford ? 'white' : '#5F5E5A'}; padding: 8px 10px; border-radius: var(--border-radius-md); font-size: 16px; font-weight: 500; margin-top: 8px; text-align: center;">${price.toLocaleString()} 🥬</div>`;
+    }
+    if (owned && !selected) {
+      action = `<button data-select="${key}" style="font-size: 13px; margin-top: 8px; width: 100%; padding: 8px;">${t().pick}</button>`;
+    } else if (!owned) {
+      action = `<button data-buy="${key}" ${!canAfford ? 'disabled' : ''} style="font-size: 13px; margin-top: 8px; width: 100%; padding: 8px; ${!canAfford ? 'opacity:0.5;' : `background: linear-gradient(90deg, ${acc.from}, ${acc.to}); border: 2px solid ${acc.to}; color: white; font-weight: 500;`}">${canAfford ? t().buy + '!' : t().notEnough}</button>`;
+    } else {
+      action = '';
+    }
+
+    // Pulsująca aura + ramka gradient
+    return `
+      <div class="zw-limited-card" style="
+        position: relative;
+        background: linear-gradient(135deg, ${acc.from}, ${acc.to});
+        border-radius: var(--border-radius-lg);
+        padding: 14px;
+        text-align: center;
+        box-shadow: 0 4px 20px ${acc.glow}66;
+        ${selected ? `outline: 3px solid ${acc.to}; outline-offset: 2px;` : ''}
+      ">
+        <div style="position: absolute; top: 6px; left: 8px; font-size: 9px; color: white; font-weight: 500; background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px;">💎 LIMITED</div>
+        <div style="font-size: 38px; line-height: 1; margin-top: 18px; filter: drop-shadow(0 2px 6px rgba(0,0,0,0.3));">${c.emoji}</div>
+        <div style="font-size: 15px; font-weight: 500; margin-top: 8px; color: ${acc.txt}; text-shadow: 0 1px 2px rgba(255,255,255,0.4);">${c.names[lang()]}</div>
+        <div style="font-size: 11px; color: ${acc.txt}; opacity: 0.9; margin-top: 4px; min-height: 28px; line-height: 1.3;">${c.descs[lang()]}</div>
+        <div style="font-size: 10px; color: ${acc.txt}; opacity: 0.85; margin-top: 4px; line-height: 1.4;">
+          ⚡ ${c.speed}× • 🥬 ${c.points}× • ❤️ ${c.lives}
+        </div>
+        ${priceTag}
+        ${action}
+      </div>`;
+  }
+
+  function renderLimitedShop() {
+    const limitedKeys = ['vip_limited', 'svip_limited', 'gvip_limited', 'zolwiomly_bogacz'];
+    root.innerHTML = `
+      ${langSwitcher()}
+      <style>
+        @keyframes zwPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.02); } }
+        @keyframes zwShimmer { 0% { background-position: 0% 50%; } 100% { background-position: 200% 50%; } }
+        @keyframes zwSparkle { 0%, 100% { opacity: 0; transform: translateY(0) scale(0.5); } 50% { opacity: 1; transform: translateY(-10px) scale(1); } }
+        .zw-limited-card { animation: zwPulse 2.5s ease-in-out infinite; }
+        .zw-limited-header { background: linear-gradient(90deg, #FAC775, #E84A6F, #7A1A8C, #FAC775); background-size: 200% 100%; animation: zwShimmer 4s linear infinite; }
+        .zw-confetti { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1000; display: none; }
+        .zw-confetti span { position: absolute; font-size: 24px; animation: zwConfetti 2s ease-out forwards; }
+        @keyframes zwConfetti { 0% { transform: translateY(-50px) rotate(0deg); opacity: 1; } 100% { transform: translateY(100vh) rotate(720deg); opacity: 0; } }
+      </style>
+      <div id="zw-confetti" class="zw-confetti"></div>
+
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; gap: 12px;">
+        <button id="backLobby" style="font-size: 14px; padding: 10px 16px; font-weight: 500;">${t().backToLobby}</button>
+        <div style="background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 8px 14px; font-weight: 500;">
+          🥬 ${player.totalEver.toLocaleString()}
+        </div>
+      </div>
+
+      <div class="zw-limited-header" style="border-radius: var(--border-radius-lg); padding: 1.5rem; margin-bottom: 1.5rem; text-align: center; color: white; box-shadow: 0 6px 24px rgba(122, 26, 140, 0.4);">
+        <div style="font-size: 32px; line-height: 1; margin-bottom: 6px;">💎 ✨ 💎</div>
+        <h2 style="margin: 0; font-size: 22px; color: white; text-shadow: 0 2px 4px rgba(0,0,0,0.3);">${t().limitedShopTitle}</h2>
+        <p style="font-size: 13px; margin: 8px 0 0; opacity: 0.95;">${t().limitedHint}</p>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin-bottom: 1rem;">
+        ${limitedKeys.map(limitedClassCard).join('')}
+      </div>
+
+      <div style="text-align: center; margin-top: 2rem;">
+        <button id="backLobby2" style="font-size: 14px; padding: 12px 24px; font-weight: 500;">${t().backToLobby}</button>
+      </div>`;
+    bindLang();
+    document.getElementById('backLobby').addEventListener('click', () => { screen = 'lobby'; render(); });
+    document.getElementById('backLobby2').addEventListener('click', () => { screen = 'lobby'; render(); });
+    root.querySelectorAll('[data-buy]').forEach(b => {
+      b.addEventListener('click', async () => {
+        const key = b.getAttribute('data-buy');
+        await buyClass(key);
+        if (player.owned[key]) showConfetti();
+      });
+    });
+    root.querySelectorAll('[data-select]').forEach(b => {
+      b.addEventListener('click', async () => { player.selectedClass = b.getAttribute('data-select'); await savePlayer(); render(); });
+    });
+  }
+
+  function showConfetti() {
+    const box = document.getElementById('zw-confetti');
+    if (!box) return;
+    box.style.display = 'block';
+    box.innerHTML = '';
+    const emojis = ['🎉', '🎊', '✨', '💎', '⭐', '🥳', '🌟'];
+    for (let i = 0; i < 35; i++) {
+      const s = document.createElement('span');
+      s.textContent = emojis[Math.floor(Math.random() * emojis.length)];
+      s.style.left = (Math.random() * 100) + '%';
+      s.style.animationDelay = (Math.random() * 0.5) + 's';
+      s.style.animationDuration = (1.5 + Math.random()) + 's';
+      box.appendChild(s);
+    }
+    setTimeout(() => { box.style.display = 'none'; box.innerHTML = ''; }, 2500);
+  }
+
+  function renderDuoChoose() {
+    const friends = player.friends || [];
+    root.innerHTML = `
+      ${langSwitcher()}
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; gap: 12px;">
+        <button id="backLobby" style="font-size: 14px; padding: 10px 16px; font-weight: 500;">${t().backToLobby}</button>
+      </div>
+
+      <h2 style="margin: 0 0 1rem; text-align: center;">🐢🐢 ${t().duoFriendTitle}</h2>
+
+      ${friends.length === 0 ? `<p style="text-align: center; color: var(--color-text-secondary); padding: 2rem 1rem;">${t().noFriendsYet}</p>` : `
+        <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 1rem;">
+          ${friends.map(name => {
+            const f = accounts[name.toLowerCase()];
+            if (!f) return '';
+            const fAvatar = f.avatar || 'green';
+            const fLevel = levelFromXp(f.totalEverEaten || 0).level;
+            const fClass = f.selectedClass || 'normal';
+            const fClassData = CLASSES[fClass] || CLASSES.normal;
+            const fBadge = getVipBadge(f);
+            return `<button data-friend="${esc(name)}" style="display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--color-background-success); border: 2px solid var(--color-border-success); border-radius: var(--border-radius-md); cursor: pointer; text-align: left; width: 100%;">
+              ${avatarSvg(fAvatar, 50)}
+              <div style="flex: 1;">
+                <div style="font-weight: 500; font-size: 15px;">${fBadge ? fBadge + ' ' : ''}${esc(name)}</div>
+                <div style="font-size: 12px; color: var(--color-text-secondary);">${t().level} ${fLevel} • ${fClassData.emoji} ${fClassData.names[lang()]}</div>
+              </div>
+              <div style="font-size: 20px;">▶️</div>
+            </button>`;
+          }).join('')}
+        </div>
+      `}
+
+      <button id="duoNoFriend" style="width: 100%; padding: 0.75rem; font-size: 14px; background: var(--color-background-secondary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-md);">
+        ${t().withoutFriend}
+      </button>`;
+    bindLang();
+    document.getElementById('backLobby').addEventListener('click', () => { screen = 'lobby'; render(); });
+    document.getElementById('duoNoFriend').addEventListener('click', () => {
+      duoFriend = null;
+      screen = 'duo';
+      render();
+    });
+    root.querySelectorAll('[data-friend]').forEach(b => {
+      b.addEventListener('click', () => {
+        duoFriend = b.getAttribute('data-friend');
+        screen = 'duo';
+        render();
+      });
+    });
+  }
+
+  function renderProfile() {
+    const xpInfo = levelFromXp(player.totalEverEaten || 0);
+    const xpPct = Math.round((xpInfo.currentXp / xpInfo.neededXp) * 100);
+    const achCount = player.ach ? Object.keys(player.ach).filter(k => player.ach[k]).length : 0;
+    const ownedCount = Object.keys(player.owned).filter(k => player.owned[k]).length;
+    const isMaster = hasMasterBadge(player);
+    const requestCount = (player.friendRequests || []).length;
+    const friendCount = (player.friends || []).length;
+    const vipBadge = getVipBadge(player);
+
+    // Lista odznak które ma gracz
+    const earned = ACHIEVEMENTS.filter(a => player.ach && player.ach[a.id]);
+
+    root.innerHTML = `
+      ${langSwitcher()}
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; gap: 12px;">
+        <button id="backLobby" style="font-size: 14px; padding: 10px 16px; font-weight: 500;">${t().backToLobby}</button>
+        <div style="background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 8px 14px; font-weight: 500;">
+          🥬 ${player.totalEver}
+        </div>
+      </div>
+
+      <div style="background: ${isMaster ? 'linear-gradient(135deg, #FAEEDA, #FAC775)' : 'var(--color-background-secondary)'}; border: ${isMaster ? '3px solid #BA7517' : '0.5px solid var(--color-border-tertiary)'}; border-radius: var(--border-radius-lg); padding: 1.5rem; margin-bottom: 1rem; ${isMaster ? 'box-shadow: 0 4px 24px rgba(186, 117, 23, 0.3);' : ''}">
+        <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+          <div style="flex-shrink: 0; background: ${isMaster ? 'rgba(255,255,255,0.5)' : 'var(--color-background-primary)'}; border-radius: 50%; padding: 8px;">
+            ${avatarSvg(player.avatar || 'green', 90)}
+          </div>
+          <div style="flex: 1; min-width: 180px;">
+            <h2 style="margin: 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+              ${vipBadge ? vipBadge : ''} ${esc(player.name)}
+              ${session.isAdmin ? ' 👑' : ''}
+              ${isMaster ? ` <span style="background: #BA7517; color: white; padding: 3px 10px; border-radius: 12px; font-size: 13px; font-weight: 500;">${t().masterBadge}</span>` : ''}
+            </h2>
+            <div style="margin-top: 8px;">
+              <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
+                <span style="font-size: 13px; font-weight: 500;">${t().level} ${xpInfo.level}</span>
+                <span style="font-size: 11px; color: var(--color-text-secondary);">${xpInfo.currentXp} / ${xpInfo.neededXp} XP</span>
+              </div>
+              <div style="background: rgba(0,0,0,0.1); border-radius: 4px; height: 8px; overflow: hidden;">
+                <div style="background: linear-gradient(90deg, #3B6D11, #97C459); height: 100%; width: ${xpPct}%; transition: width 0.3s;"></div>
+              </div>
+            </div>
+            ${isMaster ? `<div style="margin-top: 8px; font-size: 12px; color: #633806; font-weight: 500;">${t().masterBadgeDesc}</div>` : ''}
+          </div>
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 1rem;">
+        <div style="background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 0.75rem; text-align: center;">
+          <div style="font-size: 11px; color: var(--color-text-secondary);">${t().bestSolo}</div>
+          <div style="font-size: 18px; font-weight: 500;">${player.soloBest}</div>
+        </div>
+        <div style="background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 0.75rem; text-align: center;">
+          <div style="font-size: 11px; color: var(--color-text-secondary);">${t().bestDuo}</div>
+          <div style="font-size: 18px; font-weight: 500;">${player.duoBest}</div>
+        </div>
+        <div style="background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 0.75rem; text-align: center;">
+          <div style="font-size: 11px; color: var(--color-text-secondary);">${t().bestEndless}</div>
+          <div style="font-size: 18px; font-weight: 500;">${player.endlessBest || 0}s</div>
+        </div>
+        <div style="background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 0.75rem; text-align: center;">
+          <div style="font-size: 11px; color: var(--color-text-secondary);">🏅 / 🐢</div>
+          <div style="font-size: 18px; font-weight: 500;">${achCount}/${ACHIEVEMENTS.length} • ${ownedCount}</div>
+        </div>
+      </div>
+
+      <h3 style="margin: 1rem 0 0.5rem; font-size: 16px;">${t().avatarColor}</h3>
+      <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 1rem;">
+        ${AVATAR_PRESETS.map(preset => {
+          const locked = preset.requireMaster && !isMaster;
+          const selected = (player.avatar || 'green') === preset.id;
+          return `<button data-avatar="${preset.id}" ${locked ? 'disabled' : ''} style="padding: 8px; background: ${selected ? 'var(--color-background-info)' : 'var(--color-background-primary)'}; border: 2px solid ${selected ? 'var(--color-border-info)' : 'var(--color-border-tertiary)'}; border-radius: var(--border-radius-md); cursor: ${locked ? 'not-allowed' : 'pointer'}; opacity: ${locked ? 0.4 : 1}; display: flex; flex-direction: column; align-items: center; gap: 4px;">
+            ${avatarSvg(preset.id, 50)}
+            <div style="font-size: 11px; font-weight: 500;">${preset.name[lang()]}${locked ? ' 🔒' : ''}</div>
+          </button>`;
+        }).join('')}
+      </div>
+
+      <h3 style="margin: 1.5rem 0 0.5rem; font-size: 16px;">${t().myFriends} (${friendCount})${requestCount > 0 ? ` <span style="background: #C75A5A; color: white; padding: 2px 8px; border-radius: 10px; font-size: 12px; vertical-align: middle;">${requestCount} ${t().friendRequests}</span>` : ''}</h3>
+      <button id="openFriends" style="width: 100%; padding: 0.75rem; font-size: 14px; font-weight: 500; background: linear-gradient(90deg, #E6F1FB, #85B7EB); border: 2px solid #185FA5; border-radius: var(--border-radius-lg); color: #0C447C; margin-bottom: 1rem;">
+        ${t().friends}${requestCount > 0 ? ' 🔴' : ''}
+      </button>
+
+      ${earned.length > 0 ? `
+        <h3 style="margin: 1.5rem 0 0.5rem; font-size: 16px;">🏅 ${t().achievements} (${achCount}/${ACHIEVEMENTS.length})</h3>
+        <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+          ${earned.map(a => `<div title="${a.names[lang()]}" style="background: linear-gradient(135deg, #FAEEDA, #FAC775); border: 2px solid #BA7517; border-radius: 8px; padding: 6px 10px; font-size: 14px;">${a.emoji}</div>`).join('')}
+        </div>
+      ` : ''}
+
+      <div style="text-align: center; margin-top: 2rem;">
+        <button id="backLobby2" style="font-size: 14px; padding: 12px 24px; font-weight: 500;">${t().backToLobby}</button>
+      </div>`;
+    bindLang();
+    document.getElementById('backLobby').addEventListener('click', () => { screen = 'lobby'; render(); });
+    document.getElementById('backLobby2').addEventListener('click', () => { screen = 'lobby'; render(); });
+    document.getElementById('openFriends').addEventListener('click', () => { screen = 'friends'; render(); });
+    root.querySelectorAll('[data-avatar]').forEach(b => {
+      b.addEventListener('click', async () => {
+        player.avatar = b.getAttribute('data-avatar');
+        await savePlayer();
+        render();
+      });
+    });
+  }
+
+  function renderFriends() {
+    const friends = player.friends || [];
+    const requests = player.friendRequests || [];
+    root.innerHTML = `
+      ${langSwitcher()}
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; gap: 12px;">
+        <button id="backProfile" style="font-size: 14px; padding: 10px 16px; font-weight: 500;">${t().myProfile}</button>
+        <div style="background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 8px 14px; font-weight: 500;">
+          🥬 ${player.totalEver}
+        </div>
+      </div>
+
+      <h2 style="margin: 0 0 1rem; text-align: center;">👥 ${t().friendsTitle}</h2>
+
+      <div style="background: var(--color-background-secondary); border-radius: var(--border-radius-lg); padding: 1rem; margin-bottom: 1rem;">
+        <h3 style="margin: 0 0 8px; font-size: 14px;">${t().addFriend}</h3>
+        <div style="display: flex; gap: 6px;">
+          <input id="friendInput" type="text" maxlength="14" placeholder="${t().friendName}" style="flex: 1;" />
+          <button id="sendFriendBtn" style="font-size: 13px;">${t().send}</button>
+        </div>
+        <div id="friendMsg" style="font-size: 12px; margin-top: 6px; min-height: 16px;"></div>
+      </div>
+
+      ${requests.length > 0 ? `
+        <h3 style="margin: 1rem 0 0.5rem; font-size: 16px;">📩 ${t().friendRequests} (${requests.length})</h3>
+        <div style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 1rem;">
+          ${requests.map(name => {
+            const f = accounts[name.toLowerCase()];
+            const fAvatar = f ? (f.avatar || 'green') : 'green';
+            const fLevel = f ? levelFromXp(f.totalEverEaten || 0).level : 1;
+            const fBadge = f ? getVipBadge(f) : null;
+            return `<div style="display: flex; align-items: center; gap: 10px; padding: 10px; background: var(--color-background-warning); border: 2px solid var(--color-border-warning); border-radius: var(--border-radius-md);">
+              ${avatarSvg(fAvatar, 40)}
+              <div style="flex: 1;">
+                <div style="font-weight: 500;">${fBadge ? fBadge + ' ' : ''}${esc(name)}</div>
+                <div style="font-size: 11px; color: var(--color-text-secondary);">${t().level} ${fLevel}</div>
+              </div>
+              <button data-accept="${esc(name)}" style="font-size: 12px; background: var(--color-background-success); border-color: var(--color-border-success);">${t().accept}</button>
+              <button data-decline="${esc(name)}" style="font-size: 12px;">${t().decline}</button>
+            </div>`;
+          }).join('')}
+        </div>
+      ` : ''}
+
+      <h3 style="margin: 1rem 0 0.5rem; font-size: 16px;">${t().myFriends} (${friends.length})</h3>
+      ${friends.length === 0 ? `<p style="color: var(--color-text-secondary); font-size: 13px; text-align: center; padding: 1rem;">${t().noFriends}</p>` : `
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+          ${friends.map(name => {
+            const f = accounts[name.toLowerCase()];
+            const fAvatar = f ? (f.avatar || 'green') : 'green';
+            const fLevel = f ? levelFromXp(f.totalEverEaten || 0).level : 1;
+            const fBadge = f ? getVipBadge(f) : null;
+            const fSolo = f ? (f.soloBest || 0) : 0;
+            return `<div style="display: flex; align-items: center; gap: 10px; padding: 10px; background: var(--color-background-secondary); border-radius: var(--border-radius-md);">
+              ${avatarSvg(fAvatar, 40)}
+              <div style="flex: 1;">
+                <div style="font-weight: 500;">${fBadge ? fBadge + ' ' : ''}${esc(name)}</div>
+                <div style="font-size: 11px; color: var(--color-text-secondary);">${t().level} ${fLevel} • ${t().bestSolo}: ${fSolo} 🥬</div>
+              </div>
+              <button data-remove="${esc(name)}" style="font-size: 11px;">${t().removeFriend}</button>
+            </div>`;
+          }).join('')}
+        </div>
+      `}
+
+      <div style="text-align: center; margin-top: 2rem;">
+        <button id="backProfile2" style="font-size: 14px; padding: 12px 24px; font-weight: 500;">${t().myProfile}</button>
+      </div>`;
+    bindLang();
+    document.getElementById('backProfile').addEventListener('click', () => { screen = 'profile'; render(); });
+    document.getElementById('backProfile2').addEventListener('click', () => { screen = 'profile'; render(); });
+    const fI = document.getElementById('friendInput');
+    const fM = document.getElementById('friendMsg');
+    document.getElementById('sendFriendBtn').addEventListener('click', async () => {
+      const name = fI.value.trim();
+      if (!name) return;
+      const res = await sendFriendRequest(name);
+      fM.textContent = res.msg;
+      fM.style.color = res.ok ? 'var(--color-text-success)' : 'var(--color-text-danger)';
+      if (res.ok) { fI.value = ''; setTimeout(() => render(), 1000); }
+    });
+    fI.addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('sendFriendBtn').click(); });
+
+    root.querySelectorAll('[data-accept]').forEach(b => {
+      b.addEventListener('click', async () => {
+        await acceptFriendRequest(b.getAttribute('data-accept'));
+        render();
+      });
+    });
+    root.querySelectorAll('[data-decline]').forEach(b => {
+      b.addEventListener('click', async () => {
+        await declineFriendRequest(b.getAttribute('data-decline'));
+        render();
+      });
+    });
+    root.querySelectorAll('[data-remove]').forEach(b => {
+      b.addEventListener('click', async () => {
+        await removeFriend(b.getAttribute('data-remove'));
+      });
+    });
+  }
+
+  function renderAchievements() {
+    const total = ACHIEVEMENTS.length;
+    const have = player.ach ? Object.keys(player.ach).filter(k => player.ach[k]).length : 0;
+    root.innerHTML = `
+      ${langSwitcher()}
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <button id="backLobby" style="font-size: 14px; padding: 10px 16px; font-weight: 500;">${t().backToLobby}</button>
+        <div style="background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 8px 14px; font-weight: 500;">
+          🥬 ${player.totalEver}
+        </div>
+      </div>
+      <h2 style="margin: 0 0 8px; text-align: center;">🏅 ${t().achievementsTitle} ${have}/${total}</h2>
+      <p style="font-size: 13px; color: var(--color-text-secondary); text-align: center; margin: 0 0 1.5rem;">${t().achievementsHint}</p>
+
+      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;">
+        ${ACHIEVEMENTS.map(a => {
+          const got = player.ach && player.ach[a.id];
+          return `<div style="background: ${got ? 'linear-gradient(135deg, #FAEEDA, #FAC775)' : 'var(--color-background-secondary)'}; border: 2px solid ${got ? '#BA7517' : 'var(--color-border-tertiary)'}; border-radius: var(--border-radius-lg); padding: 12px; text-align: center; opacity: ${got ? 1 : 0.55};">
+            <div style="font-size: 32px; line-height: 1; ${got ? '' : 'filter: grayscale(0.8);'}">${a.emoji}</div>
+            <div style="font-size: 12px; font-weight: 500; margin-top: 6px; color: ${got ? '#412402' : 'var(--color-text-primary)'};">${a.names[lang()]}</div>
+            <div style="font-size: 10px; margin-top: 4px; color: ${got ? '#633806' : 'var(--color-text-secondary)'};">${got ? t().unlocked : t().locked}</div>
+            ${got ? `<div style="font-size: 11px; margin-top: 2px; color: #633806;">+${ACH_REWARD} 🥬</div>` : ''}
+          </div>`;
+        }).join('')}
+      </div>
+
+      <div style="text-align: center; margin-top: 2rem;">
+        <button id="backLobby2" style="font-size: 14px; padding: 12px 24px; font-weight: 500;">${t().backToLobby}</button>
+      </div>`;
+    bindLang();
+    document.getElementById('backLobby').addEventListener('click', () => { screen = 'lobby'; render(); });
+    document.getElementById('backLobby2').addEventListener('click', () => { screen = 'lobby'; render(); });
+  }
+
+  function renderGame(mode) {
+    const isDuo = mode === 'duo';
+    const isEndless = mode === 'endless';
+    const cls = player.selectedClass;
+    const c = CLASSES[cls];
+    const eventOn = isEventActive();
+    const target = isDuo ? 15 : 10;
+    root.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-size: 14px; flex-wrap: wrap; gap: 8px;">
+        <button id="backBtn" style="font-size: 13px;">${t().lobby}</button>
+        ${eventOn ? `<div style="background: ${eventState.type === 'rain' ? '#85B7EB' : '#FAC775'}; color: ${eventState.type === 'rain' ? '#0C447C' : '#633806'}; padding: 4px 10px; border-radius: 8px; font-size: 12px; font-weight: 500;">${eventState.type === 'rain' ? '🌧️ DESZCZ' : '✨ EVENT 2×'}</div>` : ''}
+        ${isEndless ? `<div style="background: linear-gradient(135deg, #EEEDFE, #AFA9EC); color: #2A2370; padding: 4px 10px; border-radius: 8px; font-size: 12px; font-weight: 500;">♾️ ENDLESS</div>` : ''}
+        ${isEndless
+          ? `<div style="font-weight: 500; color: #534AB7; font-size: 16px;">⏱️ <span id="time">0</span>s</div><div style="font-size: 12px; color: var(--color-text-secondary);">${c.emoji} <span id="score1">0</span> 🥬</div>`
+          : `<div>${c.emoji} <span id="score1" style="font-weight: 500; color: #3B6D11;">0</span> / ${target}</div>`
+        }
+        ${isDuo ? `<div>${duoFriend ? CLASSES[(accounts[duoFriend.toLowerCase()] || {selectedClass:'normal'}).selectedClass || 'normal'].emoji : '🟡'} <span id="score2" style="font-weight: 500; color: #BA7517;">0</span>${duoFriend ? ` <span style="font-size: 11px; color: var(--color-text-secondary);">(${esc(duoFriend)})</span>` : ''}</div>` : ''}
+        <div>❤️ <span id="lives" style="font-weight:500;">${c.lives}</span></div>
+        <div id="comboBox" style="display:none; background: #FAC775; color: #633806; padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: 500;">🔥 <span id="comboVal">0</span>×</div>
+        ${isEndless ? '' : `<div>${t().time}: <span id="time" style="font-weight: 500;">60</span>s</div>`}
+        <button id="soundBtn" style="font-size: 13px;">${session.soundOn ? t().sound : t().soundOff}</button>
+      </div>
+      <canvas id="game" width="640" height="400" style="background: #C0DD97; border-radius: var(--border-radius-lg); display: block; width: 100%; max-width: 640px;"></canvas>
+      <p style="font-size: 13px; color: var(--color-text-secondary); margin-top: 8px;">
+        ${isDuo ? t().controlsDuo : `<b>${c.names[lang()]}</b> ${c.emoji} — ${c.descs[lang()]} • ${t().controls}`}
+      </p>`;
+    document.getElementById('backBtn').addEventListener('click', () => { screen = 'lobby'; render(); });
+    document.getElementById('soundBtn').addEventListener('click', async () => {
+      session.soundOn = !session.soundOn;
+      document.getElementById('soundBtn').textContent = session.soundOn ? t().sound : t().soundOff;
+      await saveSession();
+    });
+    startGame(mode, cls, eventOn);
+  }
+
+  function startGame(mode, classKey, eventOn) {
+    const isDuo = mode === 'duo';
+    const isEndless = mode === 'endless';
+    const c = CLASSES[classKey];
+    // Klasa żółtego (drugiego gracza) - z konta znajomego jeśli wybrany
+    let yellowClassKey = 'normal';
+    if (isDuo && duoFriend) {
+      const friend = accounts[duoFriend.toLowerCase()];
+      if (friend && friend.selectedClass && CLASSES[friend.selectedClass]) {
+        yellowClassKey = friend.selectedClass;
+      }
+    }
+    const cYellow = CLASSES[yellowClassKey];
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const score1El = document.getElementById('score1');
+    const score2El = document.getElementById('score2');
+    const livesEl = document.getElementById('lives');
+    const timeEl = document.getElementById('time');
+    const comboBox = document.getElementById('comboBox');
+    const comboVal = document.getElementById('comboVal');
+
+    const VIEW_W = canvas.width, VIEW_H = canvas.height;
+    const MAP_W = VIEW_W * 2, MAP_H = VIEW_H * 2;
+    const isRain = eventOn && eventState.type === 'rain';
+    const eventMul = (eventOn && eventState.type === 'double') ? 2 : 1;
+    const speedMul = Math.min(c.speed * eventMul, MAX_SPEED_MULT);
+    const pointMul = c.points * eventMul;
+    const magnet = c.magnet || 0;
+    const dodge = c.dodge || 0;
+    const bonusTime = c.bonusTime || 0;
+    const bounce = c.bounce || false;
+    const freeze = c.freezeRocks || false;
+    const isRainbow = c.rainbow || false;
+    // Moce żółtego (z klasy znajomego)
+    const speedMul2 = Math.min(cYellow.speed * eventMul, MAX_SPEED_MULT);
+    const pointMul2 = cYellow.points * eventMul;
+    const magnet2 = cYellow.magnet || 0;
+    const dodge2 = cYellow.dodge || 0;
+    const target = isDuo ? 15 : 10;
+
+    let t1, t2, lettuces, rocks, powerups, score1, score2, timeLeft, elapsedSec, keys, gameOver;
+    let camX = 0, camY = 0;
+    let rafId = null, timer = null;
+    let invuln1 = 120, invuln2 = 120;
+    let lives1 = c.lives;
+    let lives2 = isDuo ? cYellow.lives : 0; // żółty ma życia z klasy znajomego (lub 1 dla normal)
+    let bounceCount = 0;
+    let bounceCount2 = 0;
+    let particles = [];
+    let combo1 = 0, comboTimer1 = 0;
+    let combo2 = 0, comboTimer2 = 0;
+    let deathAnim = null;
+    let rainTimer = 0;
+    let powerupTimer = 0;
+    let starShield = 0;
+    let starShield2 = 0;
+    let globalMagnet = 0;
+    // Statystyki rundy do raportowania w endGame
+    let runStats = {
+      powerupsCollected: 0,
+      goldEaten: 0,
+      maxCombo3: 0,    // count combo ×2 reached
+      maxCombo5: 0,    // count combo ×3 reached
+      combo3Count: 0,  // ile razy uderzył combo ×2
+      noHits: true,    // czy bez trafienia
+      speedrun: false  // 10 sałat w pierwszych 30 sek
+    };
+
+    // === AUDIO ===
+    let audioCtx = null;
+    let lastAmTime = 0;
+    function getAudio() {
+      if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {} }
+      return audioCtx;
+    }
+    function unlockAudio() {
+      const a = getAudio(); if (!a) return;
+      if (a.state === 'suspended') a.resume();
+    }
+    function playAm() {
+      if (!session.soundOn) return;
+      const a = getAudio(); if (!a || a.state !== 'running') return;
+      const now = a.currentTime;
+      if (now - lastAmTime < 0.1) return;
+      lastAmTime = now;
+      const osc = a.createOscillator(), gain = a.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(420, now);
+      osc.frequency.exponentialRampToValueAtTime(240, now + 0.18);
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.25, now + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
+      osc.connect(gain).connect(a.destination);
+      osc.start(now); osc.stop(now + 0.25);
+    }
+    function playHit() {
+      if (!session.soundOn) return;
+      const a = getAudio(); if (!a || a.state !== 'running') return;
+      const now = a.currentTime;
+      const o = a.createOscillator(), g = a.createGain();
+      o.type = 'square'; o.frequency.value = 90;
+      g.gain.setValueAtTime(0.3, now);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
+      o.connect(g).connect(a.destination);
+      o.start(now); o.stop(now + 0.22);
+    }
+    function playBek() {
+      if (!session.soundOn) return;
+      const a = getAudio(); if (!a || a.state !== 'running') return;
+      const now = a.currentTime;
+      const osc = a.createOscillator(), gain = a.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(180, now);
+      osc.frequency.linearRampToValueAtTime(90, now + 0.7);
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.35, now + 0.04);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.85);
+      osc.connect(gain).connect(a.destination);
+      osc.start(now); osc.stop(now + 0.85);
+    }
+    function playWin() {
+      if (!session.soundOn) return;
+      const a = getAudio(); if (!a || a.state !== 'running') return;
+      const now = a.currentTime;
+      [523, 659, 784, 1047].forEach((f, i) => {
+        const osc = a.createOscillator(), g = a.createGain();
+        osc.type = 'triangle'; osc.frequency.value = f;
+        g.gain.setValueAtTime(0.0001, now + i*0.12);
+        g.gain.exponentialRampToValueAtTime(0.3, now + i*0.12 + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, now + i*0.12 + 0.18);
+        osc.connect(g).connect(a.destination);
+        osc.start(now + i*0.12); osc.stop(now + i*0.12 + 0.2);
+      });
+    }
+    function playCombo() {
+      if (!session.soundOn) return;
+      const a = getAudio(); if (!a || a.state !== 'running') return;
+      const now = a.currentTime;
+      const osc = a.createOscillator(), g = a.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(660, now);
+      osc.frequency.exponentialRampToValueAtTime(990, now + 0.15);
+      g.gain.setValueAtTime(0.0001, now);
+      g.gain.exponentialRampToValueAtTime(0.3, now + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
+      osc.connect(g).connect(a.destination);
+      osc.start(now); osc.stop(now + 0.22);
+    }
+
+    function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+    function spawnLettuce() {
+      // W evencie 1/10 sałat to złota (10× wartości)
+      const gold = eventOn && Math.random() < 0.1;
+      lettuces.push({
+        x: 40+Math.random()*(MAP_W-80),
+        y: 40+Math.random()*(MAP_H-80),
+        size: 20,
+        gold
+      });
+    }
+    function spawnRock() {
+      let r, tries = 0;
+      do { r = { x: 40+Math.random()*(MAP_W-80), y: 40+Math.random()*(MAP_H-80), size: 24 }; tries++; }
+      while ((dist(r, t1) < 140 || (isDuo && dist(r, t2) < 140)) && tries < 20);
+      rocks.push(r);
+    }
+    function spawnPowerup() {
+      const type = POWERUP_KEYS[Math.floor(Math.random() * POWERUP_KEYS.length)];
+      let p, tries = 0;
+      do {
+        p = {
+          x: 80+Math.random()*(MAP_W-160),
+          y: 80+Math.random()*(MAP_H-160),
+          size: 22,
+          type,
+          life: 600,    // 10 sek przy 60fps
+          maxLife: 600,
+          bobPhase: Math.random() * Math.PI * 2
+        };
+        tries++;
+      } while ((dist(p, t1) < 100 || (isDuo && dist(p, t2) < 100)) && tries < 20);
+      powerups.push(p);
+    }
+    function spawnParticle(x, y, txt, color) {
+      // particles wokół pozycji + tekst "+1" wyskakujący
+      for (let i = 0; i < 5; i++) {
+        const ang = Math.random() * Math.PI * 2;
+        const sp = 1 + Math.random() * 2;
+        particles.push({
+          type: 'dot', x, y, vx: Math.cos(ang)*sp, vy: Math.sin(ang)*sp,
+          life: 25, maxLife: 25, color
+        });
+      }
+      particles.push({ type: 'text', x, y, vy: -1.5, life: 35, maxLife: 35, txt, color });
+    }
+    function updateParticles() {
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx || 0;
+        p.y += p.vy;
+        if (p.type === 'dot') p.vy += 0.15; // grawitacja
+        p.life--;
+        if (p.life <= 0) particles.splice(i, 1);
+      }
+    }
+    function drawParticles() {
+      for (const p of particles) {
+        const x = p.x - camX, y = p.y - camY;
+        const a = p.life / p.maxLife;
+        ctx.globalAlpha = a;
+        if (p.type === 'dot') {
+          ctx.fillStyle = p.color;
+          ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI*2); ctx.fill();
+        } else {
+          ctx.fillStyle = p.color;
+          ctx.font = '500 18px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(p.txt, x, y);
+        }
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    function init() {
+      t1 = { x: MAP_W/2 - (isDuo?80:0), y: MAP_H/2, size: 26, speed: 3.5*speedMul,
+             color: 'green', moving: false, classKey, walkPhase: 0, facing: 'right' };
+      t2 = isDuo ? { x: MAP_W/2+80, y: MAP_H/2, size: 26, speed: 3.5*speedMul2,
+                     color: 'yellow', moving: false, classKey: yellowClassKey, walkPhase: 0, facing: 'right' } : null;
+      lettuces = []; rocks = []; powerups = [];
+      score1 = 0; score2 = 0;
+      // Endless: brak czasu (timeLeft staje się elapsed seconds, rośnie)
+      timeLeft = isEndless ? 0 : (60 + bonusTime);
+      elapsedSec = 0;
+      keys = {}; gameOver = false;
+      const nL = isDuo ? 14 : 12, nR = isDuo ? 6 : 5;
+      for (let i = 0; i < nL; i++) spawnLettuce();
+      for (let i = 0; i < nR; i++) spawnRock();
+      score1El.textContent = 0;
+      if (score2El) score2El.textContent = 0;
+      timeEl.textContent = timeLeft;
+      if (livesEl) livesEl.textContent = lives1;
+      const cx = isDuo ? (t1.x+t2.x)/2 : t1.x;
+      const cy = isDuo ? (t1.y+t2.y)/2 : t1.y;
+      camX = Math.max(0, Math.min(MAP_W-VIEW_W, cx-VIEW_W/2));
+      camY = Math.max(0, Math.min(MAP_H-VIEW_H, cy-VIEW_H/2));
+    }
+
+    function colorsFor(turt) {
+      const cl = CLASSES[turt.classKey];
+      // Żółty bez specjalnej klasy = klasyczne pomarańczowe
+      if (turt.color === 'yellow' && turt.classKey === 'normal') {
+        return { main: '#BA7517', inner: '#854F0B', skin: '#EF9F27' };
+      }
+      // Rainbow effect
+      if (cl.rainbow) {
+        const hue = (turt.walkPhase * 30) % 360;
+        return {
+          main: `hsl(${hue}, 70%, 35%)`,
+          inner: `hsl(${hue}, 70%, 25%)`,
+          skin: `hsl(${(hue+30) % 360}, 70%, 60%)`
+        };
+      }
+      const r = RARITY[cl.rarity];
+      return { main: r.dark, inner: r.dark, skin: r.color };
+    }
+
+    function drawTurtle(turt, invuln) {
+      const x = turt.x - camX, y = turt.y - camY;
+      const cols = colorsFor(turt);
+      const blink = invuln > 0 && Math.floor(invuln/4) % 2 === 0;
+      const phase = turt.walkPhase;
+      const wob = turt.moving ? Math.sin(phase) * 4 : 0;
+      const headBob = turt.moving ? Math.sin(phase * 2) * 1.5 : 0;
+      const facing = turt.facing;
+
+      ctx.save();
+      ctx.translate(x, y);
+
+      // Rotacja w zależności od kierunku - obracam całą skorupę + nogi pozostają na boku
+      // Strategia: zawsze rysuję jakby żółw szedł w prawo, potem rotuję canvas
+      let rotation = 0;
+      if (facing === 'right') rotation = 0;
+      else if (facing === 'left') rotation = Math.PI;
+      else if (facing === 'up') rotation = -Math.PI / 2;
+      else if (facing === 'down') rotation = Math.PI / 2;
+      ctx.rotate(rotation);
+
+      // Cień pod żółwiem - rysowany BEZ rotacji bo zawsze pod
+      ctx.rotate(-rotation); // odwracam żeby cień był poziomy
+      ctx.fillStyle = 'rgba(0,0,0,0.25)';
+      ctx.beginPath(); ctx.ellipse(0, turt.size-2, turt.size, 7, 0, 0, Math.PI*2); ctx.fill();
+      ctx.rotate(rotation); // wracam do rotacji żółwia
+
+      ctx.globalAlpha = blink ? 0.4 : 1;
+
+      const cl = CLASSES[turt.classKey];
+      // Aury rysuję bez rotacji bo to okręgi
+      ctx.rotate(-rotation);
+      if (turt === t1 && starShield > 0) {
+        ctx.strokeStyle = '#FAC775';
+        ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.arc(0, 0, turt.size+8+Math.sin(phase*2)*3, 0, Math.PI*2); ctx.stroke();
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(0, 0, turt.size+12+Math.sin(phase*2)*3, 0, Math.PI*2); ctx.stroke();
+      } else if (cl.rarity === 'limited') {
+        const tt = Date.now() / 200;
+        ctx.strokeStyle = '#FAC775';
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(0, 0, turt.size+5+Math.sin(tt)*3, 0, Math.PI*2); ctx.stroke();
+        ctx.strokeStyle = '#E84A6F';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(0, 0, turt.size+10+Math.sin(tt+1)*3, 0, Math.PI*2); ctx.stroke();
+        ctx.strokeStyle = '#7A1A8C';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(0, 0, turt.size+15+Math.sin(tt+2)*3, 0, Math.PI*2); ctx.stroke();
+        const sparkAng = Date.now() / 300;
+        for (let i = 0; i < 3; i++) {
+          const a = sparkAng + (i * Math.PI * 2 / 3);
+          const sxs = Math.cos(a) * (turt.size + 18);
+          const sys = Math.sin(a) * (turt.size + 18);
+          ctx.fillStyle = '#FFFFFF';
+          ctx.beginPath(); ctx.arc(sxs, sys, 2.5, 0, Math.PI*2); ctx.fill();
+        }
+      } else if (cl.rarity === 'legendary' || (eventOn && eventState.type === 'double')) {
+        ctx.strokeStyle = '#FAC775';
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(0, 0, turt.size+4+Math.sin(phase)*2, 0, Math.PI*2); ctx.stroke();
+      }
+      ctx.rotate(rotation); // wracam do rotacji żółwia
+
+      // ŁAPY - 4 łapki na rogach skorupy, animowane (przeciwne fazy)
+      ctx.fillStyle = cols.skin;
+      ctx.beginPath(); ctx.arc(-(turt.size-6), -(turt.size-6)+wob, 7, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc((turt.size-6), (turt.size-6)-wob, 7, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc((turt.size-6), -(turt.size-6)-wob, 7, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(-(turt.size-6), (turt.size-6)+wob, 7, 0, Math.PI*2); ctx.fill();
+
+      // BIAŁA OBWÓDKA WOKÓŁ SKORUPY - dla widoczności
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(0, 0, turt.size + 1, 0, Math.PI*2); ctx.stroke();
+
+      // SKORUPA - główny okrąg
+      ctx.fillStyle = cols.main;
+      ctx.beginPath(); ctx.arc(0, 0, turt.size, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = cols.inner;
+      ctx.beginPath(); ctx.arc(0, 0, turt.size-6, 0, Math.PI*2); ctx.fill();
+
+      // WZÓR NA SKORUPIE - 6 kropek
+      ctx.fillStyle = cols.main;
+      for (let i = 0; i < 6; i++) {
+        const a = i*Math.PI/3;
+        ctx.beginPath();
+        ctx.arc(Math.cos(a)*(turt.size-12), Math.sin(a)*(turt.size-12), 5, 0, Math.PI*2);
+        ctx.fill();
+      }
+
+      // GŁOWA - z białą obwódką, "wystaje" w kierunku ruchu (po rotacji = zawsze w prawo)
+      // Ruch głowy w przód-tył (headBob) gdy idzie
+      const headX = turt.size - 4 + (turt.moving ? Math.abs(headBob) : 0);
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(headX, 0, 10, 0, Math.PI*2); ctx.stroke();
+      ctx.fillStyle = cols.skin;
+      ctx.beginPath(); ctx.arc(headX, 0, 10, 0, Math.PI*2); ctx.fill();
+
+      // OCZY - dwoje oczu na głowie (zależnie od kierunku patrzenia)
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath(); ctx.arc(headX + 4, -4, 3, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(headX + 4, 4, 3, 0, Math.PI*2); ctx.fill();
+      // ŹRENICE
+      ctx.fillStyle = '#000';
+      ctx.beginPath(); ctx.arc(headX + 5, -4, 1.5, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(headX + 5, 4, 1.5, 0, Math.PI*2); ctx.fill();
+
+      // OGON - mały trójkątny ogonek z tyłu
+      ctx.fillStyle = cols.skin;
+      ctx.beginPath();
+      ctx.moveTo(-turt.size, 0);
+      ctx.lineTo(-turt.size - 5, -3);
+      ctx.lineTo(-turt.size - 5, 3);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.globalAlpha = 1;
+      ctx.restore();
+
+      // EMOJI nad żółwiem - bez rotacji żeby było zawsze czytelne
+      ctx.font = '14px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(cl.emoji, x, y - turt.size - 4);
+    }
+    function drawDeath() {
+      if (!deathAnim) return;
+      deathAnim.frame++;
+      deathAnim.rot += 0.3;
+      const x = deathAnim.x - camX, y = deathAnim.y - camY;
+      const scale = 1 + deathAnim.frame * 0.05;
+      const alpha = Math.max(0, 1 - deathAnim.frame / 30);
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.translate(x, y);
+      ctx.rotate(deathAnim.rot);
+      ctx.scale(scale, scale);
+      ctx.fillStyle = '#3B6D11';
+      ctx.beginPath(); ctx.arc(0, 0, 20, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#27500A';
+      ctx.beginPath(); ctx.arc(0, 0, 14, 0, Math.PI*2); ctx.fill();
+      ctx.restore();
+      ctx.globalAlpha = 1;
+    }
+    function drawLettuce(l) {
+      const x = l.x-camX, y = l.y-camY;
+      if (x < -30 || x > VIEW_W+30 || y < -30 || y > VIEW_H+30) return;
+      // Złota sałata - złota poświata pulsująca
+      if (l.gold) {
+        const pulse = 1 + Math.sin(Date.now()/200) * 0.2;
+        ctx.fillStyle = 'rgba(250, 199, 117, 0.5)';
+        ctx.beginPath(); ctx.arc(x, y, (l.size+10) * pulse, 0, Math.PI*2); ctx.fill();
+        // Biała obwódka
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(x, y, l.size + 1, 0, Math.PI*2); ctx.stroke();
+        ctx.fillStyle = '#FAC775';
+        ctx.beginPath(); ctx.arc(x, y, l.size, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#BA7517';
+        ctx.beginPath();
+        ctx.arc(x-6, y-4, 8, 0, Math.PI*2);
+        ctx.arc(x+6, y-4, 8, 0, Math.PI*2);
+        ctx.arc(x, y+6, 8, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle = '#854F0B';
+        ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = '12px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('✨', x + Math.cos(Date.now()/300)*15, y + Math.sin(Date.now()/300)*15);
+        return;
+      }
+      // Sałaty z deszczu
+      if (l.fromRain) {
+        ctx.fillStyle = 'rgba(133, 183, 235, 0.4)';
+        ctx.beginPath(); ctx.arc(x, y, l.size+6, 0, Math.PI*2); ctx.fill();
+      }
+      // BIAŁA OBWÓDKA - kluczowa dla widoczności na trawie
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(x, y, l.size + 1, 0, Math.PI*2); ctx.stroke();
+      // Sałata - jaśniejsza, bardziej żywa zieleń (żeby kontrastowała z ciemnozieloną trawą)
+      ctx.fillStyle = '#B8E060';
+      ctx.beginPath(); ctx.arc(x, y, l.size, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#7AC42F';
+      ctx.beginPath();
+      ctx.arc(x-6, y-4, 8, 0, Math.PI*2);
+      ctx.arc(x+6, y-4, 8, 0, Math.PI*2);
+      ctx.arc(x, y+6, 8, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#3B6D11';
+      ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI*2); ctx.fill();
+    }
+    function drawPowerup(p) {
+      const x = p.x-camX, y = p.y-camY;
+      if (x < -40 || x > VIEW_W+40 || y < -40 || y > VIEW_H+40) return;
+      const pt = POWERUP_TYPES[p.type];
+      // miganie gdy zostało <2s (120 klatek)
+      const blink = p.life < 120 && Math.floor(p.life/8) % 2 === 0;
+      const bob = Math.sin(p.bobPhase + Date.now()/300) * 4;
+      ctx.globalAlpha = blink ? 0.4 : 1;
+      // Aura
+      ctx.fillStyle = pt.color + '55';
+      ctx.beginPath(); ctx.arc(x, y + bob, p.size + 6, 0, Math.PI*2); ctx.fill();
+      // Tło
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath(); ctx.arc(x, y + bob, p.size, 0, Math.PI*2); ctx.fill();
+      // Border
+      ctx.strokeStyle = pt.color;
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(x, y + bob, p.size, 0, Math.PI*2); ctx.stroke();
+      // Emoji
+      ctx.font = '24px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(pt.emoji, x, y + bob);
+      ctx.textBaseline = 'alphabetic';
+      ctx.globalAlpha = 1;
+    }
+    function drawRock(r) {
+      const x = r.x-camX, y = r.y-camY;
+      if (x < -40 || x > VIEW_W+40 || y < -40 || y > VIEW_H+40) return;
+      // CIEŃ pod kamieniem
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.beginPath(); ctx.ellipse(x, y + r.size - 2, r.size, 5, 0, 0, Math.PI*2); ctx.fill();
+      // CZARNA OBWÓDKA
+      ctx.strokeStyle = '#1A1A1A';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(x, y, r.size, 0, Math.PI*2); ctx.stroke();
+      // Główny kolor - ciemnoszary albo lodowy niebieski
+      ctx.fillStyle = freeze ? '#5DA3D8' : '#6B6862';
+      ctx.beginPath(); ctx.arc(x, y, r.size, 0, Math.PI*2); ctx.fill();
+      // Ciemne plamy żeby wyglądał jak kamień
+      ctx.fillStyle = freeze ? '#185FA5' : '#3D3B37';
+      ctx.beginPath(); ctx.arc(x-6, y-6, 7, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(x+5, y+4, 5, 0, Math.PI*2); ctx.fill();
+      // Jasny highlight żeby był 3D
+      ctx.fillStyle = freeze ? '#A2D0F0' : '#9B9893';
+      ctx.beginPath(); ctx.arc(x-8, y-9, 4, 0, Math.PI*2); ctx.fill();
+      // Kryształki na zamrożonych
+      if (freeze) {
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x-9, y); ctx.lineTo(x+9, y);
+        ctx.moveTo(x, y-9); ctx.lineTo(x, y+9);
+        ctx.stroke();
+      }
+    }
+
+    function moveTurtle(turt, mx, my) {
+      if (mx === 0 && my === 0) { turt.moving = false; return; }
+      turt.moving = true;
+      // 4-kierunkowe facing: priorytet ma kierunek poziomy gdy idzie po skosie
+      // bo mało zmian (głowa po prostu jest w bok). Jak idzie tylko góra/dół, używamy up/down.
+      if (mx > 0) turt.facing = 'right';
+      else if (mx < 0) turt.facing = 'left';
+      else if (my < 0) turt.facing = 'up';
+      else if (my > 0) turt.facing = 'down';
+      if (mx !== 0 && my !== 0) { mx *= 0.707; my *= 0.707; }
+      turt.x += mx * turt.speed;
+      turt.y += my * turt.speed;
+      turt.x = Math.max(turt.size, Math.min(MAP_W-turt.size, turt.x));
+      turt.y = Math.max(turt.size, Math.min(MAP_H-turt.size, turt.y));
+      turt.walkPhase += 0.35;
+    }
+
+    function updateCamera() {
+      const cx = isDuo ? (t1.x+t2.x)/2 : t1.x;
+      const cy = isDuo ? (t1.y+t2.y)/2 : t1.y;
+      camX += ((cx-VIEW_W/2)-camX) * 0.35;
+      camY += ((cy-VIEW_H/2)-camY) * 0.35;
+      camX = Math.max(0, Math.min(MAP_W-VIEW_W, camX));
+      camY = Math.max(0, Math.min(MAP_H-VIEW_H, camY));
+    }
+    let lastEndlessSpawn = -1;
+    let amCounter = 0;
+    function update() {
+      if (gameOver) return;
+      let mx1=0, my1=0;
+      if (keys['ArrowUp']) my1-=1; if (keys['ArrowDown']) my1+=1;
+      if (keys['ArrowLeft']) mx1-=1; if (keys['ArrowRight']) mx1+=1;
+      moveTurtle(t1, mx1, my1);
+      if (isDuo) {
+        let mx2=0, my2=0;
+        if (keys['w']||keys['W']) my2-=1; if (keys['s']||keys['S']) my2+=1;
+        if (keys['a']||keys['A']) mx2-=1; if (keys['d']||keys['D']) mx2+=1;
+        moveTurtle(t2, mx2, my2);
+      }
+      if (invuln1 > 0) invuln1--;
+      if (invuln2 > 0) invuln2--;
+      if (starShield > 0) starShield--;
+      if (globalMagnet > 0) globalMagnet--;
+      updateCamera();
+      updateParticles();
+
+      // Combo timer — combo wygasa po 3 sekundach bez sałaty
+      if (comboTimer1 > 0) {
+        comboTimer1--;
+        if (comboTimer1 <= 0 && combo1 > 0) {
+          combo1 = 0;
+          comboBox.style.display = 'none';
+        }
+      }
+
+      // Deszcz sałat: spawn co ~30 klatek (0.5s)
+      if (isRain) {
+        rainTimer++;
+        if (rainTimer >= 30 && lettuces.length < 30) {
+          rainTimer = 0;
+          const gold = Math.random() < 0.1;
+          const l = { x: 40+Math.random()*(MAP_W-80), y: 40+Math.random()*(MAP_H-80), size: 20, fromRain: true, gold };
+          lettuces.push(l);
+        }
+      }
+
+      // POWER-UPY: spawn co 13 sekund (780 klatek), max 1 na mapie
+      powerupTimer++;
+      if (powerupTimer >= 780 && powerups.length === 0) {
+        powerupTimer = 0;
+        spawnPowerup();
+      }
+      // Aktualizacja czasów życia power-upów
+      for (let i = powerups.length-1; i >= 0; i--) {
+        powerups[i].life--;
+        if (powerups[i].life <= 0) powerups.splice(i, 1);
+      }
+
+      // ENDLESS: rosnąca trudność - co 30 sekund +1 stały kamień
+      if (isEndless && elapsedSec > 0 && elapsedSec % 30 === 0 && elapsedSec !== lastEndlessSpawn) {
+        lastEndlessSpawn = elapsedSec;
+        spawnRock();
+        spawnParticle(t1.x, t1.y - 50, '+🪨', '#5F5E5A');
+      }
+
+      // Magnes klasy + globalMagnet (truskawka)
+      const effMagnet = globalMagnet > 0 ? Math.max(MAP_W, MAP_H) : magnet;
+      if (effMagnet > 0) {
+        for (const l of lettuces) {
+          const d = dist(l, t1);
+          if (d < effMagnet && d > 1) {
+            const speed = globalMagnet > 0 ? 6 : 2;
+            l.x += (t1.x-l.x)/d * speed;
+            l.y += (t1.y-l.y)/d * speed;
+          }
+        }
+      }
+
+      // SAŁATY - zbieranie
+      for (let i = lettuces.length-1; i >= 0; i--) {
+        const l = lettuces[i];
+        const d1 = dist(l, t1);
+        const d2 = isDuo ? dist(l, t2) : Infinity;
+        if (d1 < t1.size+l.size-8 && d1 <= d2) {
+          // ZŁOTA SAŁATA: punkty ×10
+          const goldMul = l.gold ? 10 : 1;
+          const gained = Math.max(1, Math.round(pointMul)) * goldMul;
+          // Combo bonus (działa też na złotych)
+          const comboMul = combo1 >= 5 ? 3 : combo1 >= 3 ? 2 : 1;
+          const totalGained = gained * comboMul;
+          score1 += totalGained;
+          combo1++;
+          comboTimer1 = 180;
+          if (combo1 === 3) runStats.combo3Count++;
+          if (combo1 === 3) runStats.maxCombo3 = Math.max(runStats.maxCombo3, 1);
+          if (combo1 === 5) runStats.maxCombo5 = Math.max(runStats.maxCombo5, 1);
+          if (combo1 >= 3) {
+            comboBox.style.display = '';
+            comboVal.textContent = comboMul;
+            if (combo1 === 3 || combo1 === 5) playCombo();
+          }
+          if (l.gold) {
+            runStats.goldEaten++;
+            spawnParticle(l.x, l.y, t().goldSalad, '#FAC775');
+            playWin();
+          } else {
+            spawnParticle(l.x, l.y, '+' + totalGained, comboMul > 1 ? '#FAC775' : '#3B6D11');
+            playAm();
+          }
+          score1El.textContent = score1;
+          lettuces.splice(i, 1);
+          spawnLettuce();
+          if (score1 % 10 === 0 && score1 > 0 && !isEndless) spawnRock();
+        } else if (isDuo && d2 < t2.size+l.size-8) {
+          const goldMul = l.gold ? 10 : 1;
+          const gained2 = Math.max(1, Math.round(pointMul2)) * goldMul;
+          score2 += gained2;
+          score2El.textContent = score2;
+          combo2++;
+          comboTimer2 = 180;
+          if (l.gold) {
+            runStats.goldEaten++;
+            spawnParticle(l.x, l.y, t().goldSalad, '#FAC775');
+            playWin();
+          } else {
+            spawnParticle(l.x, l.y, '+' + gained2, '#BA7517');
+            playAm();
+          }
+          lettuces.splice(i, 1);
+          spawnLettuce();
+          if ((score1+score2) % 10 === 0) spawnRock();
+        }
+      }
+
+      // POWER-UPY - zbieranie
+      for (let i = powerups.length-1; i >= 0; i--) {
+        const p = powerups[i];
+        const d1 = dist(p, t1);
+        if (d1 < t1.size + p.size - 6) {
+          // Zebrano!
+          const pt = POWERUP_TYPES[p.type];
+          runStats.powerupsCollected++;
+          playWin();
+          if (p.type === 'tomato') {
+            if (isEndless) {
+              // W endless: pomidor daje +5 sałat-monet (bonus do zarobku)
+              score1 += 5;
+              score1El.textContent = score1;
+              spawnParticle(p.x, p.y, '+5 🥬', pt.color);
+            } else {
+              timeLeft += 5;
+              if (timeEl) timeEl.textContent = timeLeft;
+              spawnParticle(p.x, p.y, t().tomatoTime, pt.color);
+            }
+          } else if (p.type === 'star') {
+            starShield = 300; // 5 sekund
+            invuln1 = Math.max(invuln1, 300);
+            spawnParticle(p.x, p.y, t().starShield, pt.color);
+          } else if (p.type === 'strawberry') {
+            globalMagnet = 180; // 3 sekundy
+            spawnParticle(p.x, p.y, t().strawberryMag, pt.color);
+          } else if (p.type === 'bomb') {
+            // Wszystkie kamienie wybuchają z efektem
+            for (const r of rocks) {
+              spawnParticle(r.x, r.y, '💥', '#C75A5A');
+            }
+            rocks = [];
+            spawnParticle(p.x, p.y, t().bombBoom, pt.color);
+          }
+          powerups.splice(i, 1);
+        }
+      }
+
+      // KAMIENIE - kolizje
+      for (const r of rocks) {
+        if (freeze) continue; // ICE: kamienie nie zabijają
+        // Star shield: nieaktywne uderzenia
+        if (starShield > 0) continue;
+
+        if (invuln1 <= 0 && dist(r, t1) < t1.size+r.size-8) {
+          if (dodge > 0 && Math.random() < dodge) {
+            invuln1 = 30;
+            spawnParticle(t1.x, t1.y - t1.size, '✨', '#85B7EB');
+            continue;
+          }
+          if (bounce) {
+            bounceCount++;
+            const dx = t1.x-r.x, dy = t1.y-r.y;
+            const len = Math.hypot(dx, dy)||1;
+            t1.x += (dx/len)*60; t1.y += (dy/len)*60;
+            t1.x = Math.max(t1.size, Math.min(MAP_W-t1.size, t1.x));
+            t1.y = Math.max(t1.size, Math.min(MAP_H-t1.size, t1.y));
+            invuln1 = 30;
+            playHit();
+            if (bounceCount >= 3) {
+              bounceCount = 0;
+              lives1--;
+              runStats.noHits = false;
+              if (livesEl) livesEl.textContent = Math.max(0, lives1);
+              spawnParticle(t1.x, t1.y, '-1 ❤️', '#C75A5A');
+              combo1 = 0; comboTimer1 = 0; comboBox.style.display = 'none';
+              if (lives1 <= 0) {
+                gameOver = true;
+                deathAnim = { x: t1.x, y: t1.y, rot: 0, frame: 0 };
+                playBek();
+                setTimeout(() => finishGame(t().hitRock), 800);
+                return;
+              }
+            }
+            continue;
+          }
+          // Normalne trafienie
+          lives1--;
+          runStats.noHits = false;
+          if (livesEl) livesEl.textContent = Math.max(0, lives1);
+          invuln1 = 90;
+          combo1 = 0; comboTimer1 = 0; comboBox.style.display = 'none';
+          spawnParticle(t1.x, t1.y, '-1 ❤️', '#C75A5A');
+          playHit();
+          const dx = t1.x-r.x, dy = t1.y-r.y;
+          const len = Math.hypot(dx, dy)||1;
+          t1.x += (dx/len)*40; t1.y += (dy/len)*40;
+          t1.x = Math.max(t1.size, Math.min(MAP_W-t1.size, t1.x));
+          t1.y = Math.max(t1.size, Math.min(MAP_H-t1.size, t1.y));
+          if (lives1 <= 0) {
+            gameOver = true;
+            deathAnim = { x: t1.x, y: t1.y, rot: 0, frame: 0 };
+            playBek();
+            setTimeout(() => finishGame(t().hitRock), 800);
+            return;
+          }
+          break;
+        }
+        if (isDuo && invuln2 <= 0 && dist(r, t2) < t2.size+r.size-8) {
+          // Dodge dla żółtego
+          if (dodge2 > 0 && Math.random() < dodge2) {
+            invuln2 = 30;
+            spawnParticle(t2.x, t2.y - t2.size, '✨', '#85B7EB');
+            continue;
+          }
+          // Star shield dla żółtego
+          if (starShield2 > 0) continue;
+          lives2--;
+          invuln2 = 90;
+          combo2 = 0; comboTimer2 = 0;
+          spawnParticle(t2.x, t2.y, '-1 ❤️', '#C75A5A');
+          playHit();
+          const dx = t2.x-r.x, dy = t2.y-r.y;
+          const len = Math.hypot(dx, dy)||1;
+          t2.x += (dx/len)*40; t2.y += (dy/len)*40;
+          t2.x = Math.max(t2.size, Math.min(MAP_W-t2.size, t2.x));
+          t2.y = Math.max(t2.size, Math.min(MAP_H-t2.size, t2.y));
+          if (lives2 <= 0) {
+            gameOver = true;
+            deathAnim = { x: t2.x, y: t2.y, rot: 0, frame: 0 };
+            playBek();
+            setTimeout(() => finishGame(t().hitRock), 800);
+            return;
+          }
+          break;
+        }
+      }
+    }
+
+    function finishGame(msg) {
+      ctx.fillStyle = 'rgba(0,0,0,0.65)';
+      ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+      ctx.fillStyle = '#fff';
+      ctx.font = '500 24px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(msg, VIEW_W/2, VIEW_H/2-30);
+      ctx.font = '500 22px sans-serif';
+      if (isEndless) {
+        // W endless: główny wynik = sekundy. Sałaty pokazane jako "monety za rundę"
+        ctx.fillStyle = '#FAC775';
+        ctx.fillText('⏱️ ' + elapsedSec + 's', VIEW_W/2, VIEW_H/2+5);
+        ctx.fillStyle = '#fff';
+        ctx.font = '500 16px sans-serif';
+        ctx.fillText(t().lettucesLabel + ' ' + score1 + ' 🥬', VIEW_W/2, VIEW_H/2+30);
+      } else {
+        const total = score1 + score2;
+        ctx.fillText(t().lettucesLabel + ' ' + total + ' 🥬', VIEW_W/2, VIEW_H/2+5);
+      }
+      const bestNow = isDuo ? Math.max(score1, score2) : score1;
+      let wasBest = false;
+      if (mode === 'solo') wasBest = bestNow > player.soloBest;
+      else if (mode === 'duo') wasBest = bestNow > player.duoBest;
+      else if (mode === 'endless') wasBest = elapsedSec > (player.endlessBest || 0);
+      if (wasBest) {
+        ctx.fillStyle = '#FAC775';
+        ctx.font = '500 18px sans-serif';
+        ctx.fillText(t().newRecord, VIEW_W/2, VIEW_H/2 + (isEndless ? 55 : 35));
+        playWin();
+      }
+      ctx.fillStyle = '#fff'; ctx.font = '14px sans-serif';
+      ctx.fillText(t().backingToLobby, VIEW_W/2, VIEW_H/2 + (isEndless ? 85 : 65));
+      cleanup();
+      // Speedrun check: 10+ sałat w pierwszych 30 sek (tylko solo)
+      if (mode === 'solo' && score1 >= 10 && elapsedSec <= 30) runStats.speedrun = true;
+      // Przekazuję elapsedSec żeby endGame wiedział ile gracz wytrzymał
+      runStats.elapsedSec = elapsedSec;
+      setTimeout(() => endGame(mode, score1, score2, runStats), 2200);
+    }
+
+    function drawMapBg() {
+      const isDouble = eventOn && eventState.type === 'double';
+      // Tło - ciemniejsza zieleń żeby sałata i żółw były widoczne
+      ctx.fillStyle = isRain ? '#B5D5EE' : (isDouble ? '#F5DDA8' : '#7FA94A');
+      ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+
+      // TRAWA — wysokie, ciemne kępki, łatwe do odróżnienia od sałaty
+      const grassColor = isRain ? '#3F6B95' : (isDouble ? '#A57515' : '#3D5F1E');
+      const grassColorLight = isRain ? '#5D88AC' : (isDouble ? '#C09030' : '#4F7B26');
+      ctx.fillStyle = grassColor;
+      const step = 28;
+      const sx = Math.floor(camX/step)*step, sy = Math.floor(camY/step)*step;
+      for (let x = sx; x < camX+VIEW_W+step; x += step) {
+        for (let y = sy; y < camY+VIEW_H+step; y += step) {
+          // Pseudolosowa pozycja kępki w komórce
+          const seed = ((Math.abs(x)*7+Math.abs(y)*13) % 100) / 100;
+          const seed2 = ((Math.abs(x)*11+Math.abs(y)*17) % 100) / 100;
+          const tx = x - camX + seed * 18;
+          const ty = y - camY + seed2 * 18;
+          // Kępka trawy: 3 łodyżki różnej wysokości
+          ctx.fillStyle = grassColor;
+          ctx.fillRect(tx, ty, 2, 9);
+          ctx.fillRect(tx + 3, ty + 2, 2, 7);
+          ctx.fillRect(tx + 6, ty + 1, 2, 8);
+          // Jaśniejsze końce - daje wrażenie 3D
+          ctx.fillStyle = grassColorLight;
+          ctx.fillRect(tx, ty, 2, 2);
+          ctx.fillRect(tx + 3, ty + 2, 2, 2);
+          ctx.fillRect(tx + 6, ty + 1, 2, 2);
+        }
+      }
+
+      // Granica mapy - gruba czerwona aż widoczna
+      ctx.strokeStyle = '#5F3A1A';
+      ctx.lineWidth = 5;
+      ctx.strokeRect(-camX, -camY, MAP_W, MAP_H);
+
+      // Krople deszczu
+      if (isRain) {
+        ctx.fillStyle = 'rgba(24, 95, 165, 0.5)';
+        for (let i = 0; i < 25; i++) {
+          const dx = ((i * 73 + (Date.now()/30)) % VIEW_W);
+          const dy = ((i * 41 + (Date.now()/15)) % VIEW_H);
+          ctx.fillRect(dx, dy, 2, 10);
+        }
+      }
+    }
+
+    function draw() {
+      drawMapBg();
+      rocks.forEach(drawRock);
+      lettuces.forEach(drawLettuce);
+      powerups.forEach(drawPowerup);
+      if (!gameOver || !deathAnim) drawTurtle(t1, invuln1);
+      if (isDuo && (!gameOver || !deathAnim)) drawTurtle(t2, invuln2);
+      drawDeath();
+      drawParticles();
+    }
+    function loop() { update(); draw(); if (!gameOver || (deathAnim && deathAnim.frame < 30)) rafId = requestAnimationFrame(loop); }
+    function tick() {
+      if (gameOver) return;
+      elapsedSec++;
+      if (isEndless) {
+        // Endless: timeEl pokazuje sekundy przetrwania (rośnie)
+        timeEl.textContent = elapsedSec;
+        // Brak warunku końca z czasu - kończy się tylko śmiercią
+      } else {
+        timeLeft--;
+        timeEl.textContent = timeLeft;
+        if (timeLeft <= 0) {
+          gameOver = true;
+          const total = score1 + score2;
+          if (total >= target) playWin(); else playBek();
+          finishGame(total >= target ? t().youWin : t().timeUp);
+        }
+      }
+    }
+
+    const onK = e => { keys[e.key]=true; if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault(); unlockAudio(); };
+    const onU = e => { keys[e.key]=false; };
+    document.addEventListener('keydown', onK);
+    document.addEventListener('keyup', onU);
+    canvas.addEventListener('click', () => unlockAudio());
+    canvas.addEventListener('touchstart', () => unlockAudio(), { passive: true });
+
+    function cleanup() {
+      if (rafId) cancelAnimationFrame(rafId);
+      if (timer) clearInterval(timer);
+      document.removeEventListener('keydown', onK);
+      document.removeEventListener('keyup', onU);
+    }
+    init();
+    timer = setInterval(tick, 1000);
+    rafId = requestAnimationFrame(loop);
+  }
+
+  function render() {
+    if (screen === 'auth') renderAuth();
+    else if (screen === 'lobby') renderLobby();
+    else if (screen === 'shop') renderShop();
+    else if (screen === 'limited') renderLimitedShop();
+    else if (screen === 'ach') renderAchievements();
+    else if (screen === 'profile') renderProfile();
+    else if (screen === 'friends') renderFriends();
+    else if (screen === 'duoChoose') renderDuoChoose();
+    else renderGame(screen); // 'solo', 'duo', 'endless'
+  }
+  load();
+})();
+</script>
+</body>
+</html>
