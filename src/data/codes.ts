@@ -50,6 +50,14 @@ export const CODES: Record<string, CodeReward> = {
     classes: ["vip_limited"],
     label: { pl: "VIP Limited odblokowane!", fr: "VIP Limited débloqué !" },
   },
+  mojamamajestnajlepsza: {
+    id: "mojamamajestnajlepsza",
+    coins: 3500,
+    label: {
+      pl: "💖 Mama jest najlepsza! +3500 🥬",
+      fr: "💖 Maman est la meilleure ! +3500 🥬",
+    },
+  },
   // Cheat code — działa nieskończenie (każde użycie daje +1000)
   minecraft: {
     id: "minecraft",
