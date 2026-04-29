@@ -1,7 +1,6 @@
 import { ACHIEVEMENTS, ACH_REWARD } from "@/data/achievements";
 import { TURTLES } from "@/data/turtles";
-import type { Account } from "./auth";
-import type { GameResult } from "./auth";
+import type { Account, GameResult } from "./auth";
 
 type Mode = "solo" | "duo" | "endless";
 

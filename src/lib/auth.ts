@@ -1,6 +1,8 @@
 // Auth logic — keeps localStorage shape COMPATIBLE with the legacy game.
-// When a session is set here, the legacy game (loaded via iframe at /play)
-// reads the same keys and skips its own auth screen.
+// When a session is set here, the legacy game reads the same keys and skips its own auth screen.
+
+import { updateDaily } from "./daily";
+import { checkAchievements } from "./achievements";
 
 const SESSION_KEY = "zolwie:zolwiki_session_v4";
 const ACCOUNTS_KEY = "zolwie:zolwiki_accounts_v4";
@@ -288,12 +290,6 @@ export function saveGameResult(
   a.stats.powerups = (a.stats.powerups ?? 0) + (result.powerupsPicked ?? 0);
   a.stats.gold = (a.stats.gold ?? 0) + (result.goldEaten ?? 0);
 
-  // Daily challenge progress
-  // Imported lazily to avoid circular deps with this module.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { updateDaily } = require("./daily") as typeof import("./daily");
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { checkAchievements } = require("./achievements") as typeof import("./achievements");
   const dailyOut = updateDaily(a, mode, result);
   out.dailyJustCompleted = dailyOut.justCompleted;
   out.newAchievements = checkAchievements(a, { mode, result });
@@ -309,8 +305,6 @@ export function checkAchievementsAfterShop(): string[] {
   const accounts = readAccounts();
   const a = accounts[session.name.toLowerCase()];
   if (!a) return [];
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { checkAchievements } = require("./achievements") as typeof import("./achievements");
   const newly = checkAchievements(a, {});
   if (newly.length > 0) writeAccounts(accounts);
   return newly;
