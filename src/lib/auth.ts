@@ -249,8 +249,11 @@ export function tryRedeemCode(rawCode: string): RedeemResult {
   if (!a) return { ok: false, reason: "noSession" };
 
   if (!a.redeemed) a.redeemed = {};
-  if (a.redeemed[reward.id]) return { ok: false, reason: "already" };
-  a.redeemed[reward.id] = true;
+  if (!reward.repeatable && a.redeemed[reward.id]) {
+    return { ok: false, reason: "already" };
+  }
+  // Mark only one-shot codes; repeatable codes can be redeemed unlimited times
+  if (!reward.repeatable) a.redeemed[reward.id] = true;
 
   if (reward.coins) {
     a.totalEver += reward.coins;

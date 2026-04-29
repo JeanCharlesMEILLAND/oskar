@@ -8,6 +8,8 @@ export type CodeReward = {
   coins?: number;
   /** Class IDs added to owned (turtles unlocked for free). */
   classes?: string[];
+  /** If true, the code can be redeemed unlimited times (cheat code). Otherwise once per account. */
+  repeatable?: boolean;
   /** Display label in the success toast. */
   label: { pl: string; fr: string };
 };
@@ -35,5 +37,12 @@ export const CODES: Record<string, CodeReward> = {
     coins: 1500,
     classes: ["vip_limited"],
     label: { pl: "VIP Limited odblokowane!", fr: "VIP Limited débloqué !" },
+  },
+  // Cheat code — działa nieskończenie (każde użycie daje +1000)
+  minecraft: {
+    id: "minecraft",
+    coins: 1000,
+    repeatable: true,
+    label: { pl: "🎮 MINECRAFT! +1000 🥬", fr: "🎮 MINECRAFT ! +1000 🥬" },
   },
 };
