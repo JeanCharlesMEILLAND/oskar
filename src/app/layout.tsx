@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Fraunces, Inter } from "next/font/google";
 import { LanguageProvider } from "@/i18n/LanguageProvider";
+import { TurtleChat } from "@/components/TurtleChat";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -61,7 +62,10 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} ${fraunces.variable} ${inter.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <LanguageProvider>{children}</LanguageProvider>
+        <LanguageProvider>
+          {children}
+          <TurtleChat />
+        </LanguageProvider>
       </body>
     </html>
   );
