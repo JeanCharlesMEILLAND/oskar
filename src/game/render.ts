@@ -412,21 +412,39 @@ function drawLettuce(ctx: CanvasRenderingContext2D, l: Lettuce) {
   const scale = 1 + Math.sin(l.bobPhase * 1.3) * 0.05;
   ctx.translate(l.pos.x, l.pos.y + bobY);
   // Shadow under
-  ctx.fillStyle = "rgba(0,0,0,0.22)";
+  ctx.fillStyle = "rgba(0,0,0,0.25)";
   ctx.beginPath();
-  ctx.ellipse(0, 14, 14 * scale, 4, 0, 0, Math.PI * 2);
+  ctx.ellipse(0, 16, 15 * scale, 4, 0, 0, Math.PI * 2);
   ctx.fill();
-  // Soft glow halo for gold
+  // Bright halo to pop on green grass
   if (l.isGold) {
-    const halo = ctx.createRadialGradient(0, 0, 4, 0, 0, 26);
-    halo.addColorStop(0, "rgba(253, 224, 71, 0.7)");
+    // Gold radial halo (warmer)
+    const halo = ctx.createRadialGradient(0, 0, 4, 0, 0, 32);
+    halo.addColorStop(0, "rgba(254, 243, 199, 0.95)");
+    halo.addColorStop(0.5, "rgba(253, 224, 71, 0.7)");
     halo.addColorStop(1, "rgba(253, 224, 71, 0)");
     ctx.fillStyle = halo;
     ctx.beginPath();
-    ctx.arc(0, 0, 26, 0, Math.PI * 2);
+    ctx.arc(0, 0, 32, 0, Math.PI * 2);
     ctx.fill();
+  } else {
+    // Soft white halo + thin ring
+    const halo = ctx.createRadialGradient(0, 0, 6, 0, 0, 22);
+    halo.addColorStop(0, "rgba(255, 255, 255, 0.85)");
+    halo.addColorStop(0.6, "rgba(255, 255, 255, 0.4)");
+    halo.addColorStop(1, "rgba(255, 255, 255, 0)");
+    ctx.fillStyle = halo;
+    ctx.beginPath();
+    ctx.arc(0, 0, 22, 0, Math.PI * 2);
+    ctx.fill();
+    // Crisp white ring for definition
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, 16, 0, Math.PI * 2);
+    ctx.stroke();
   }
-  // Salade emoji
+  // Salade emoji on top
   ctx.scale(scale, scale);
   ctx.font = "30px system-ui, 'Apple Color Emoji', 'Segoe UI Emoji'";
   ctx.textAlign = "center";
