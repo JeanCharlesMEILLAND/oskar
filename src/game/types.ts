@@ -53,6 +53,15 @@ export type Particle = {
   size: number;
 };
 
+export type GameEvent =
+  | { type: "eat"; combo: number; isGold: boolean }
+  | { type: "hit" }
+  | { type: "win" }
+  | { type: "lose" }
+  | { type: "combo" }
+  | { type: "powerup"; kind: PowerUpKind }
+  | { type: "bomb" };
+
 export type GameState = {
   tick: number;
   mode: Mode;
@@ -74,7 +83,9 @@ export type GameState = {
   pointsMultiplier: number; // for events
   rng: () => number; // deterministic random
   mapSeed: number;
+  events: GameEvent[]; // drained by host each frame
 };
 
-export type Input = { dir: Dir; action: boolean };
+// Vector input: dx/dy in {-1, 0, 1}. Allows diagonals naturally.
+export type Input = { dx: -1 | 0 | 1; dy: -1 | 0 | 1; action: boolean };
 export type Inputs = Record<string, Input>;

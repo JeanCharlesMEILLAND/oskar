@@ -1,4 +1,4 @@
-import type { GameState, Inputs, Mode, Turtle, Lettuce, Rock } from "./types";
+import type { GameState, Inputs, Mode, Turtle, PowerUp, PowerUpKind } from "./types";
 import {
   COMBO_THRESHOLD_2X,
   COMBO_THRESHOLD_3X,
@@ -8,34 +8,62 @@ import {
   LETTUCE_INITIAL_COUNT,
   LETTUCE_RADIUS,
   LETTUCE_RESPAWN_SEC,
+  MAGNET_FORCE,
   MAP_H,
   MAP_W,
+  POWERUP_DURATION_SEC,
+  POWERUP_INTERVAL_SEC,
+  POWERUP_RADIUS_PICK,
   ROCK_INITIAL_COUNT,
   ROCK_MAX,
   ROCK_RADIUS,
   ROCK_RESPAWN_SEC,
   SOLO_DURATION_SEC,
   SOLO_TARGET,
+  STAR_DURATION_SEC,
+  STRAWBERRY_DURATION_SEC,
   TICK_DT,
   TICK_RATE,
+  TOMATO_ENDLESS_COIN_BONUS,
+  TOMATO_TIME_BONUS,
   TURTLE_BASE_SPEED,
   TURTLE_RADIUS,
 } from "./constants";
 import { clamp, dist2, mulberry32, randRange } from "./util";
+import { CLASS_STATS, getClassStats, TURTLES_BY_ID } from "@/data/turtles";
 
-export function createState(mode: Mode, seed = Date.now() & 0xffffffff): GameState {
+const POWERUP_KINDS: PowerUpKind[] = ["tomato", "star", "strawberry", "bomb"];
+
+export function createState(
+  mode: Mode,
+  options: { selectedClassId?: string; seed?: number } = {},
+): GameState {
+  const seed = options.seed ?? (Date.now() & 0xffffffff);
   const rng = mulberry32(seed);
-  const turtles = [
+  const classId = options.selectedClassId ?? "normal";
+  const stats = getClassStats(classId);
+  const visual = TURTLES_BY_ID[classId]?.visual;
+  const color = visual
+    ? { body: visual.body, shell: visual.shell, accent: visual.accent }
+    : { body: "#4ade80", shell: "#22c55e", accent: "#16a34a" };
+
+  // bonusTime: extra seconds for solo/duo
+  const baseTime =
+    mode === "endless"
+      ? Infinity
+      : SOLO_DURATION_SEC + (stats.bonusTime ?? 0);
+
+  const turtles: Turtle[] = [
     {
       id: "p1",
-      classId: "normal",
-      color: { body: "#4ade80", shell: "#22c55e", accent: "#16a34a" },
+      classId,
+      color,
       pos: { x: mode === "duo" ? MAP_W / 2 - 80 : MAP_W / 2, y: MAP_H / 2 },
       vel: { x: 0, y: 0 },
-      facing: "down" as const,
+      facing: "down",
       isMoving: false,
       score: 0,
-      lives: mode === "endless" ? 3 : 1,
+      lives: stats.lives + (mode === "endless" ? 2 : 0),
       combo: 0,
       comboTimer: 0,
       invulnUntil: 0,
@@ -49,7 +77,7 @@ export function createState(mode: Mode, seed = Date.now() & 0xffffffff): GameSta
       color: { body: "#facc15", shell: "#eab308", accent: "#fde047" },
       pos: { x: MAP_W / 2 + 80, y: MAP_H / 2 },
       vel: { x: 0, y: 0 },
-      facing: "down" as const,
+      facing: "down",
       isMoving: false,
       score: 0,
       lives: 1,
@@ -59,6 +87,7 @@ export function createState(mode: Mode, seed = Date.now() & 0xffffffff): GameSta
       magnetUntil: 0,
     });
   }
+
   const state: GameState = {
     tick: 0,
     mode,
@@ -67,7 +96,7 @@ export function createState(mode: Mode, seed = Date.now() & 0xffffffff): GameSta
     rocks: [],
     powerups: [],
     particles: [],
-    timeLeftSec: mode === "endless" ? Infinity : SOLO_DURATION_SEC,
+    timeLeftSec: baseTime,
     ended: false,
     result: null,
     nextLettuceId: 1,
@@ -80,6 +109,7 @@ export function createState(mode: Mode, seed = Date.now() & 0xffffffff): GameSta
     pointsMultiplier: 1,
     rng,
     mapSeed: seed,
+    events: [],
   };
   for (let i = 0; i < LETTUCE_INITIAL_COUNT; i++) spawnLettuce(state);
   for (let i = 0; i < ROCK_INITIAL_COUNT; i++) spawnRock(state);
@@ -90,11 +120,14 @@ export function tick(state: GameState, inputs: Inputs) {
   if (state.ended) return;
   state.tick++;
 
-  // Movement
+  // Movement (with class speed)
   for (const t of state.turtles) {
-    const input = inputs[t.id] ?? { dir: "idle", action: false };
-    applyTurtleMovement(t, input.dir);
+    const input = inputs[t.id] ?? { dx: 0, dy: 0, action: false };
+    applyTurtleMovement(t, input.dx, input.dy);
   }
+
+  // Magnet pull (class-based + strawberry)
+  applyMagnet(state);
 
   // Spawns
   state.spawnLettuceTimer += TICK_DT;
@@ -107,6 +140,13 @@ export function tick(state: GameState, inputs: Inputs) {
     state.spawnRockTimer = 0;
     spawnRock(state);
   }
+  state.spawnPowerUpTimer += TICK_DT;
+  if (state.spawnPowerUpTimer >= POWERUP_INTERVAL_SEC) {
+    state.spawnPowerUpTimer = 0;
+    spawnPowerUp(state);
+  }
+  // Power-up expiry
+  state.powerups = state.powerups.filter((p) => state.tick < p.expiresAtTick);
 
   // Collisions
   handleCollisions(state);
@@ -140,32 +180,58 @@ export function tick(state: GameState, inputs: Inputs) {
     state.timeLeftSec -= TICK_DT;
     if (state.timeLeftSec <= 0) {
       state.timeLeftSec = 0;
-      endGame(state, /*timeOut=*/ true);
+      endGame(state, true);
     }
   }
 
-  // Lose conditions
   if (!state.ended) {
     const allDead = state.turtles.every((t) => t.lives <= 0);
-    if (allDead) endGame(state, /*timeOut=*/ false);
+    if (allDead) endGame(state, false);
   }
 }
 
-function applyTurtleMovement(t: Turtle, dir: import("./types").Dir) {
-  const speed = TURTLE_BASE_SPEED;
+function applyTurtleMovement(t: Turtle, dx: number, dy: number) {
+  const stats = getClassStats(t.classId);
+  const speed = TURTLE_BASE_SPEED * stats.speed;
   let vx = 0, vy = 0;
-  if (dir === "up") { vy = -speed; t.facing = "up"; }
-  else if (dir === "down") { vy = speed; t.facing = "down"; }
-  else if (dir === "left") { vx = -speed; t.facing = "left"; }
-  else if (dir === "right") { vx = speed; t.facing = "right"; }
+  const len = Math.hypot(dx, dy);
+  if (len > 0) {
+    vx = (dx / len) * speed;
+    vy = (dy / len) * speed;
+    // Facing: vertical takes priority for diagonals (turtle "looks" up/down then left/right)
+    if (Math.abs(dy) >= Math.abs(dx)) {
+      t.facing = dy < 0 ? "up" : "down";
+    } else {
+      t.facing = dx < 0 ? "left" : "right";
+    }
+  }
   t.vel = { x: vx, y: vy };
   t.isMoving = vx !== 0 || vy !== 0;
   t.pos.x = clamp(t.pos.x + vx, TURTLE_RADIUS, MAP_W - TURTLE_RADIUS);
   t.pos.y = clamp(t.pos.y + vy, TURTLE_RADIUS, MAP_H - TURTLE_RADIUS);
 }
 
+function applyMagnet(state: GameState) {
+  for (const t of state.turtles) {
+    const stats = getClassStats(t.classId);
+    let radius = stats.magnet ?? 0;
+    if (state.tick < t.magnetUntil) radius = Math.max(radius, 9999);
+    if (radius <= 0) continue;
+    const r2 = radius * radius;
+    for (const l of state.lettuces) {
+      const dx = t.pos.x - l.pos.x;
+      const dy = t.pos.y - l.pos.y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < r2 && d2 > 1) {
+        const d = Math.sqrt(d2);
+        l.pos.x += (dx / d) * MAGNET_FORCE * (d < 60 ? 6 : 3);
+        l.pos.y += (dy / d) * MAGNET_FORCE * (d < 60 ? 6 : 3);
+      }
+    }
+  }
+}
+
 function spawnLettuce(state: GameState) {
-  // Don't spawn on top of turtle or rocks
   for (let attempt = 0; attempt < 30; attempt++) {
     const pos = {
       x: randRange(state.rng, 50, MAP_W - 50),
@@ -202,45 +268,107 @@ function spawnRock(state: GameState) {
   }
 }
 
+function spawnPowerUp(state: GameState) {
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const pos = {
+      x: randRange(state.rng, 80, MAP_W - 80),
+      y: randRange(state.rng, 80, MAP_H - 80),
+    };
+    if (state.turtles.some((t) => dist2(t.pos, pos) < 100 ** 2)) continue;
+    if (state.rocks.some((r) => dist2(r.pos, pos) < (ROCK_RADIUS + 20) ** 2)) continue;
+    state.powerups.push({
+      id: state.nextPowerUpId++,
+      pos,
+      kind: POWERUP_KINDS[Math.floor(state.rng() * POWERUP_KINDS.length)],
+      expiresAtTick: state.tick + Math.floor(POWERUP_DURATION_SEC * TICK_RATE),
+    });
+    return;
+  }
+}
+
 function handleCollisions(state: GameState) {
   for (const t of state.turtles) {
+    const stats = getClassStats(t.classId);
+
     // Lettuce
     for (let i = state.lettuces.length - 1; i >= 0; i--) {
       const l = state.lettuces[i];
       if (dist2(t.pos, l.pos) < (TURTLE_RADIUS + LETTUCE_RADIUS) ** 2) {
-        // Eat
         const base = l.isGold ? GOLD_VALUE : 1;
         const mult = state.pointsMultiplier;
+        const classPoints = stats.points;
         let comboMult = 1;
         if (t.combo + 1 >= COMBO_THRESHOLD_3X) comboMult = 3;
         else if (t.combo + 1 >= COMBO_THRESHOLD_2X) comboMult = 2;
-        t.score += base * mult * comboMult;
+        t.score += Math.round(base * mult * classPoints * comboMult);
         t.combo++;
         t.comboTimer = 0;
         spawnEatParticles(state, l.pos, l.isGold);
+        state.events.push({ type: "eat", combo: t.combo, isGold: l.isGold });
+        if (t.combo === COMBO_THRESHOLD_2X || t.combo === COMBO_THRESHOLD_3X) {
+          state.events.push({ type: "combo" });
+        }
         state.lettuces.splice(i, 1);
-        // Win check
-        if (state.mode === "solo" && t.score >= SOLO_TARGET) {
-          endGame(state, /*timeOut=*/ false);
-        }
-        // In duo, first to reach target also ends the round
-        if (state.mode === "duo" && t.score >= SOLO_TARGET) {
-          endGame(state, /*timeOut=*/ false);
-        }
+
+        // Reaching SOLO_TARGET doesn't end the round — keep playing for high score.
+        // Game ends only when timer expires (solo/duo) or all turtles die.
       }
     }
-    // Rock
-    if (state.tick >= t.invulnUntil) {
-      for (const r of state.rocks) {
+
+    // Power-ups
+    for (let i = state.powerups.length - 1; i >= 0; i--) {
+      const p = state.powerups[i];
+      if (dist2(t.pos, p.pos) < (TURTLE_RADIUS + POWERUP_RADIUS_PICK) ** 2) {
+        applyPowerUp(state, t, p);
+        state.events.push({ type: "powerup", kind: p.kind });
+        state.powerups.splice(i, 1);
+      }
+    }
+
+    // Rocks
+    if (state.tick >= t.invulnUntil && !stats.freezeRocks) {
+      for (let i = 0; i < state.rocks.length; i++) {
+        const r = state.rocks[i];
         if (dist2(t.pos, r.pos) < (TURTLE_RADIUS + ROCK_RADIUS - 4) ** 2) {
+          // Dodge?
+          if (stats.dodge && state.rng() < stats.dodge) {
+            t.invulnUntil = state.tick + Math.floor(0.5 * TICK_RATE);
+            break;
+          }
+          // Bounce?
+          if (stats.bounce) {
+            const dx = t.pos.x - r.pos.x;
+            const dy = t.pos.y - r.pos.y;
+            const d = Math.sqrt(dx * dx + dy * dy) || 1;
+            t.pos.x += (dx / d) * 30;
+            t.pos.y += (dy / d) * 30;
+            t.invulnUntil = state.tick + Math.floor(0.5 * TICK_RATE);
+            break;
+          }
+          // Damage
           t.lives--;
           t.invulnUntil = state.tick + Math.floor(HIT_INVULN_SEC * TICK_RATE);
           t.combo = 0;
           spawnHitParticles(state, t.pos);
+          state.events.push({ type: "hit" });
           break;
         }
       }
     }
+  }
+}
+
+function applyPowerUp(state: GameState, t: Turtle, p: PowerUp) {
+  if (p.kind === "tomato") {
+    if (state.mode === "endless") t.score += TOMATO_ENDLESS_COIN_BONUS;
+    else state.timeLeftSec += TOMATO_TIME_BONUS;
+  } else if (p.kind === "star") {
+    t.invulnUntil = Math.max(t.invulnUntil, state.tick + Math.floor(STAR_DURATION_SEC * TICK_RATE));
+  } else if (p.kind === "strawberry") {
+    t.magnetUntil = Math.max(t.magnetUntil, state.tick + Math.floor(STRAWBERRY_DURATION_SEC * TICK_RATE));
+  } else if (p.kind === "bomb") {
+    state.rocks = [];
+    state.events.push({ type: "bomb" });
   }
 }
 
@@ -249,10 +377,7 @@ function spawnEatParticles(state: GameState, pos: { x: number; y: number }, isGo
   for (let i = 0; i < (isGold ? 14 : 8); i++) {
     state.particles.push({
       pos: { ...pos },
-      vel: {
-        x: (state.rng() - 0.5) * 4,
-        y: (state.rng() - 0.5) * 4,
-      },
+      vel: { x: (state.rng() - 0.5) * 4, y: (state.rng() - 0.5) * 4 },
       life: 30,
       maxLife: 30,
       color: colors[Math.floor(state.rng() * colors.length)],
@@ -265,10 +390,7 @@ function spawnHitParticles(state: GameState, pos: { x: number; y: number }) {
   for (let i = 0; i < 12; i++) {
     state.particles.push({
       pos: { ...pos },
-      vel: {
-        x: (state.rng() - 0.5) * 6,
-        y: (state.rng() - 0.5) * 6,
-      },
+      vel: { x: (state.rng() - 0.5) * 6, y: (state.rng() - 0.5) * 6 },
       life: 25,
       maxLife: 25,
       color: ["#94a3b8", "#475569", "#cbd5e1"][Math.floor(state.rng() * 3)],
@@ -280,20 +402,16 @@ function spawnHitParticles(state: GameState, pos: { x: number; y: number }) {
 function endGame(state: GameState, timeOut: boolean) {
   if (state.ended) return;
   state.ended = true;
-  // Score: max across players (duo = highest wins)
   const score = Math.max(...state.turtles.map((t) => t.score), 0);
   const survivedSec = state.mode === "endless" ? Math.floor(state.tick / TICK_RATE) : undefined;
   let won: boolean;
   if (state.mode === "solo") won = score >= SOLO_TARGET;
-  else if (state.mode === "duo") won = !timeOut; // duo "wins" if they finish the timer
-  else won = false; // endless never "wins"
-  state.result = {
-    score,
-    survivedSec,
-    won,
-    lettuces: score,
-  };
+  else if (state.mode === "duo") won = !timeOut;
+  else won = false;
+  state.result = { score, survivedSec, won, lettuces: score };
+  state.events.push({ type: won ? "win" : "lose" });
 }
 
-// Re-export for callers
 export type { GameState, Inputs, Mode } from "./types";
+// Suppress unused import warning for CLASS_STATS (re-exported via getClassStats)
+export { CLASS_STATS };

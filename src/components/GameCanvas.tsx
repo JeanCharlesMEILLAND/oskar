@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { TICK_DT, SOLO_TARGET } from "@/game/constants";
 import { createState, tick, type GameState, type Inputs, type Mode } from "@/game/engine";
 import { lerpCameraToTurtle, render } from "@/game/render";
-import { saveGameResult, type GameResult } from "@/lib/auth";
+import { SFX } from "@/game/audio";
+import { getCurrentAccount, saveGameResult, type GameResult } from "@/lib/auth";
 
 type DirKey = "up" | "down" | "left" | "right";
 
@@ -64,7 +65,10 @@ export function GameCanvas({
     updateSize();
     window.addEventListener("resize", updateSize);
 
-    const state: GameState = createState(mode);
+    const account = getCurrentAccount();
+    const state: GameState = createState(mode, {
+      selectedClassId: account?.selectedClass ?? "normal",
+    });
     const inputs: Inputs = {};
     const keysDown = new Set<string>();
     let camera = {
@@ -91,11 +95,18 @@ export function GameCanvas({
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
 
-    function resolveDir(map: Record<string, DirKey>): DirKey | "idle" {
-      for (const k of Array.from(keysDown).reverse()) {
-        if (k in map) return map[k];
+    function resolveVec(map: Record<string, DirKey>): { dx: -1 | 0 | 1; dy: -1 | 0 | 1 } {
+      let dx: -1 | 0 | 1 = 0;
+      let dy: -1 | 0 | 1 = 0;
+      // Iterate ALL pressed keys so diagonals work (up+right, etc.)
+      for (const k of keysDown) {
+        const dir = map[k];
+        if (dir === "up") dy = -1;
+        else if (dir === "down") dy = 1;
+        else if (dir === "left") dx = -1;
+        else if (dir === "right") dx = 1;
       }
-      return "idle";
+      return { dx, dy };
     }
 
     let lastTime = performance.now();
@@ -107,10 +118,30 @@ export function GameCanvas({
       accumulator += Math.min(dt, 0.25);
 
       while (accumulator >= TICK_DT) {
-        inputs.p1 = { dir: resolveDir(p1Map), action: false };
-        if (p2Map) inputs.p2 = { dir: resolveDir(p2Map), action: false };
+        const v1 = resolveVec(p1Map);
+        inputs.p1 = { dx: v1.dx, dy: v1.dy, action: false };
+        if (p2Map) {
+          const v2 = resolveVec(p2Map);
+          inputs.p2 = { dx: v2.dx, dy: v2.dy, action: false };
+        }
         tick(state, inputs);
         accumulator -= TICK_DT;
+      }
+
+      // Drain audio events
+      if (state.events.length > 0) {
+        for (const ev of state.events) {
+          if (ev.type === "eat") {
+            if (ev.isGold) SFX.eatGold();
+            else SFX.eat(ev.combo);
+          } else if (ev.type === "hit") SFX.hit();
+          else if (ev.type === "win") SFX.win();
+          else if (ev.type === "lose") SFX.lose();
+          else if (ev.type === "combo") SFX.combo();
+          else if (ev.type === "powerup") SFX.powerup();
+          else if (ev.type === "bomb") SFX.bomb();
+        }
+        state.events.length = 0;
       }
 
       camera = lerpCameraToTurtle(camera, state.turtles[0], viewW, viewH, 0.12);
@@ -160,7 +191,13 @@ export function GameCanvas({
           <div className="bg-white/85 backdrop-blur rounded-2xl px-4 py-2 shadow-lg">
             <div className="text-[10px] uppercase tracking-widest text-emerald-700/70 leading-none flex items-center gap-1.5">
               <span className="inline-block w-2 h-2 rounded-full bg-emerald-500" />
-              {mode === "duo" ? "P1" : mode === "endless" ? "Score" : `Cel ${SOLO_TARGET} 🥬`}
+              {mode === "duo"
+                ? "P1"
+                : mode === "endless"
+                  ? "Score"
+                  : hud.p1Score >= SOLO_TARGET
+                    ? `🏆 Cel ${SOLO_TARGET} 🥬`
+                    : `Cel ${SOLO_TARGET} 🥬`}
             </div>
             <div className="font-[var(--font-fraunces)] text-2xl font-semibold text-emerald-950 leading-tight">
               {hud.p1Score}

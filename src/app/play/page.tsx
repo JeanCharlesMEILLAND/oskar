@@ -191,7 +191,7 @@ export default function LobbyPage() {
                 {selectedClass.descs[lang]}
               </p>
               <Link
-                href="/play/game"
+                href="/shop"
                 className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-emerald-700 hover:text-emerald-900 transition"
               >
                 {t("lobby.changeClass")} →
@@ -217,10 +217,10 @@ export default function LobbyPage() {
 
         {/* Quick links — open the legacy via /play/game and let user navigate inside */}
         <div className="mt-10 grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <QuickLink emoji="🛒" label={t("lobby.shop")} />
-          <QuickLink emoji="💎" label={t("lobby.limited")} />
-          <QuickLink emoji="🏅" label={t("lobby.achievements")} />
-          <QuickLink emoji="👤" label={t("lobby.profile")} />
+          <QuickLink href="/shop" emoji="🛒" label={t("lobby.shop")} />
+          <QuickLink href="/shop" emoji="💎" label={t("lobby.limited")} />
+          <QuickLink href="/play/game?mode=solo" emoji="🏅" label={t("lobby.achievements")} />
+          <QuickLink href="/play/game?mode=solo" emoji="👤" label={t("lobby.profile")} />
         </div>
 
         {/* Big play CTA — defaults to solo */}
@@ -318,10 +318,10 @@ function RankRow({
   );
 }
 
-function QuickLink({ emoji, label }: { emoji: string; label: string }) {
+function QuickLink({ href, emoji, label }: { href: string; emoji: string; label: string }) {
   return (
     <Link
-      href="/play/game"
+      href={href}
       className="group flex items-center gap-3 rounded-2xl bg-white/70 backdrop-blur border border-emerald-100 px-4 py-3 hover:bg-white hover:border-emerald-300 transition"
     >
       <span className="text-2xl group-hover:scale-110 transition-transform">

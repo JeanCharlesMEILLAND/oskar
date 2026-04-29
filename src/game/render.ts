@@ -1,7 +1,7 @@
 // Pure rendering — given a state and a canvas context, draw everything.
 // Map decorations are deterministic from `state.mapSeed`, drawn once to an offscreen canvas.
 
-import type { GameState, Turtle, Lettuce, Rock, Particle } from "./types";
+import type { GameState, Turtle, Lettuce, Rock, Particle, PowerUp } from "./types";
 import { COLORS, MAP_H, MAP_W, ROCK_RADIUS, TURTLE_RADIUS } from "./constants";
 import { clamp, lerp, mulberry32, randRange } from "./util";
 
@@ -217,6 +217,7 @@ export function render(
   const renderQueue: Array<{ y: number; draw: () => void }> = [];
   for (const r of state.rocks) renderQueue.push({ y: r.pos.y, draw: () => drawRock(ctx, r) });
   for (const l of state.lettuces) renderQueue.push({ y: l.pos.y, draw: () => drawLettuce(ctx, l) });
+  for (const p of state.powerups) renderQueue.push({ y: p.pos.y, draw: () => drawPowerUp(ctx, p, state.tick) });
   for (const t of state.turtles)
     renderQueue.push({ y: t.pos.y + 8, draw: () => drawTurtle(ctx, t, state.tick) });
   renderQueue.sort((a, b) => a.y - b.y);
@@ -271,22 +272,44 @@ function drawMinimap(
   const sx = mmW / MAP_W;
   const sy = mmH / MAP_H;
 
-  // Lettuces
-  ctx.fillStyle = "#bbf7d0";
+  // Lettuces — drawn as tiny salads (emoji + soft halo)
+  ctx.font = "10px system-ui, 'Apple Color Emoji', 'Segoe UI Emoji', sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
   for (const l of state.lettuces) {
-    if (l.isGold) ctx.fillStyle = "#fde047";
-    else ctx.fillStyle = "#86efac";
-    ctx.beginPath();
-    ctx.arc(mmX + l.pos.x * sx, mmY + l.pos.y * sy, l.isGold ? 2.2 : 1.6, 0, Math.PI * 2);
-    ctx.fill();
+    const x = mmX + l.pos.x * sx;
+    const y = mmY + l.pos.y * sy;
+    ctx.fillText(l.isGold ? "🌟" : "🥬", x, y);
   }
 
-  // Rocks
+  // Rocks — small pebbles
   ctx.fillStyle = COLORS.rockDark;
   for (const r of state.rocks) {
     ctx.beginPath();
     ctx.arc(mmX + r.pos.x * sx, mmY + r.pos.y * sy, 1.6, 0, Math.PI * 2);
     ctx.fill();
+  }
+
+  // Power-ups (pulse + their emoji)
+  const pulseR = 7 + Math.sin(state.tick * 0.15) * 1.5;
+  const puEmoji: Record<string, string> = {
+    tomato: "🍅",
+    star: "⭐",
+    strawberry: "🍓",
+    bomb: "💣",
+  };
+  for (const p of state.powerups) {
+    const x = mmX + p.pos.x * sx;
+    const y = mmY + p.pos.y * sy;
+    // Pulse halo
+    ctx.fillStyle = "rgba(255,255,255,0.45)";
+    ctx.beginPath();
+    ctx.arc(x, y, pulseR, 0, Math.PI * 2);
+    ctx.fill();
+    // Emoji
+    ctx.font = "11px system-ui, 'Apple Color Emoji', 'Segoe UI Emoji', sans-serif";
+    ctx.fillStyle = "#000";
+    ctx.fillText(puEmoji[p.kind] ?? "?", x, y);
   }
 
   // Camera viewport indicator
@@ -553,6 +576,83 @@ function drawHex(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: numbe
     else ctx.lineTo(x, y);
   }
   ctx.closePath();
+  ctx.stroke();
+}
+
+function drawPowerUp(ctx: CanvasRenderingContext2D, p: PowerUp, tick: number) {
+  ctx.save();
+  const bob = Math.sin(tick * 0.08 + p.id) * 3;
+  ctx.translate(p.pos.x, p.pos.y + bob);
+  // Halo
+  const halo = ctx.createRadialGradient(0, 0, 5, 0, 0, 28);
+  const colorMap: Record<string, [string, string, string]> = {
+    tomato: ["#fee2e2", "#ef4444", "#7f1d1d"],
+    star: ["#fef9c3", "#facc15", "#a16207"],
+    strawberry: ["#fce7f3", "#ec4899", "#831843"],
+    bomb: ["#e2e8f0", "#475569", "#0f172a"],
+  };
+  const [light, mid, dark] = colorMap[p.kind] ?? colorMap.tomato;
+  halo.addColorStop(0, "rgba(255,255,255,0.5)");
+  halo.addColorStop(0.5, mid + "55");
+  halo.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = halo;
+  ctx.beginPath();
+  ctx.arc(0, 0, 28, 0, Math.PI * 2);
+  ctx.fill();
+  // Body
+  if (p.kind === "tomato") {
+    ctx.fillStyle = mid;
+    ctx.beginPath(); ctx.arc(0, 0, 12, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#15803d";
+    ctx.beginPath(); ctx.ellipse(0, -10, 6, 3, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#fca5a5";
+    ctx.beginPath(); ctx.arc(-4, -3, 3, 0, Math.PI * 2); ctx.fill();
+  } else if (p.kind === "star") {
+    drawStarShape(ctx, 0, 0, 13, mid, dark);
+  } else if (p.kind === "strawberry") {
+    ctx.fillStyle = mid;
+    ctx.beginPath();
+    ctx.moveTo(0, -10); ctx.bezierCurveTo(13, -10, 13, 8, 0, 13); ctx.bezierCurveTo(-13, 8, -13, -10, 0, -10);
+    ctx.fill();
+    ctx.fillStyle = "#15803d";
+    ctx.beginPath(); ctx.moveTo(-7, -10); ctx.lineTo(-2, -14); ctx.lineTo(2, -14); ctx.lineTo(7, -10); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#fef9c3";
+    for (let i = 0; i < 6; i++) {
+      const a = (Math.PI * 2 * i) / 6;
+      ctx.beginPath(); ctx.arc(Math.cos(a) * 5, Math.sin(a) * 5, 1, 0, Math.PI * 2); ctx.fill();
+    }
+  } else if (p.kind === "bomb") {
+    ctx.fillStyle = mid;
+    ctx.beginPath(); ctx.arc(0, 1, 12, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#a16207";
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(0, -11); ctx.lineTo(-4, -16); ctx.stroke();
+    // spark
+    ctx.fillStyle = "#fde047";
+    ctx.beginPath(); ctx.arc(-4, -16, 2.5, 0, Math.PI * 2); ctx.fill();
+  }
+  // Highlight ring
+  ctx.strokeStyle = "rgba(255,255,255,0.7)";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(0, 0, 13, 0, Math.PI * 2); ctx.stroke();
+  ctx.restore();
+}
+
+function drawStarShape(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, fill: string, stroke: string) {
+  ctx.fillStyle = fill;
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const radius = i % 2 === 0 ? r : r * 0.45;
+    const a = -Math.PI / 2 + (Math.PI * i) / 5;
+    const x = cx + Math.cos(a) * radius;
+    const y = cy + Math.sin(a) * radius;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fill();
   ctx.stroke();
 }
 

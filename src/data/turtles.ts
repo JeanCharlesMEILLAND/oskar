@@ -2,6 +2,18 @@ import type { TurtleProps } from "@/components/Turtle";
 
 export type Rarity = "basic" | "rare" | "epic" | "legendary" | "limited";
 
+export type TurtleStats = {
+  speed: number;
+  points: number;
+  lives: number;
+  magnet?: number; // pull radius (px)
+  dodge?: number; // 0..1 probability to ignore rock hit
+  bonusTime?: number; // extra seconds at game start
+  freezeRocks?: boolean; // rocks never damage
+  rainbow?: boolean; // visual flag
+  bounce?: boolean; // bounce off rocks instead of damage
+};
+
 export type TurtleClass = {
   id: string;
   rarity: Rarity;
@@ -11,6 +23,53 @@ export type TurtleClass = {
   descs: { pl: string; fr: string };
   visual: Omit<TurtleProps, "idKey" | "className">;
 };
+
+// Stats per class, ported verbatim from legacy gra_zolwiki_v10.html lines 96-156.
+export const CLASS_STATS: Record<string, TurtleStats> = {
+  // basic
+  normal: { speed: 1, points: 1, lives: 1 },
+  fast: { speed: 1.5, points: 1, lives: 1 },
+  strong: { speed: 1, points: 1, lives: 2 },
+  double: { speed: 1, points: 2, lives: 1 },
+  leafy: { speed: 1, points: 1, lives: 1, magnet: 50 },
+  sneaky: { speed: 1, points: 1, lives: 1, dodge: 0.3 },
+  happy: { speed: 1, points: 1, lives: 1, bonusTime: 10 },
+  ninja: { speed: 1.3, points: 1.3, lives: 1 },
+  rainbow: { speed: 1.1, points: 1, lives: 1, rainbow: true, magnet: 40 },
+  // rare
+  bouncy: { speed: 1.1, points: 1, lives: 2, bounce: true },
+  chubby: { speed: 0.8, points: 1, lives: 3 },
+  sleepy: { speed: 0.7, points: 3, lives: 1 },
+  fire: { speed: 1.5, points: 1.5, lives: 1 },
+  ice: { speed: 1, points: 1.2, lives: 1, freezeRocks: true },
+  thunder: { speed: 1.8, points: 1, lives: 1 },
+  armored: { speed: 0.9, points: 1.2, lives: 3 },
+  magnet: { speed: 1, points: 1, lives: 1, magnet: 100 },
+  royal: { speed: 1, points: 3, lives: 1 },
+  cosmic: { speed: 1.3, points: 1, lives: 1, bonusTime: 15 },
+  forest: { speed: 1, points: 1, lives: 2, magnet: 70 },
+  swift: { speed: 1.8, points: 1, lives: 1 },
+  // epic
+  dragon: { speed: 1.8, points: 2, lives: 2 },
+  crystal: { speed: 0.95, points: 1.3, lives: 4, magnet: 80 },
+  shadow: { speed: 1.4, points: 1.5, lives: 2, dodge: 0.5 },
+  sun: { speed: 1.5, points: 1.5, lives: 1, magnet: 60 },
+  galaxy: { speed: 1.2, points: 2, lives: 2, bonusTime: 30 },
+  rocket: { speed: 2, points: 1.5, lives: 1 },
+  // legendary
+  god: { speed: 2, points: 3, lives: 3 },
+  phoenix: { speed: 1.5, points: 2, lives: 5, magnet: 90 },
+  titan: { speed: 1.8, points: 2, lives: 3, magnet: 100, dodge: 0.4 },
+  // limited
+  vip_limited: { speed: 2, points: 2.5, lives: 3, magnet: 80, dodge: 0.4 },
+  svip_limited: { speed: 2, points: 3, lives: 4, magnet: 100, dodge: 0.5, bonusTime: 20 },
+  gvip_limited: { speed: 2, points: 4, lives: 5, magnet: 120, dodge: 0.6, bonusTime: 30 },
+  zolwiomly_bogacz: { speed: 2, points: 5, lives: 7, magnet: 150, dodge: 0.7, bonusTime: 60 },
+};
+
+export function getClassStats(id: string): TurtleStats {
+  return CLASS_STATS[id] ?? CLASS_STATS.normal;
+}
 
 export const TURTLES: TurtleClass[] = [
   // ============== BASIC ==============

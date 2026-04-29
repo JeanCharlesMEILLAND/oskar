@@ -217,6 +217,36 @@ export type GameResult = {
   won: boolean;
 };
 
+export type ShopResult = { ok: true; account: Account } | { ok: false; reason: "noSession" | "alreadyOwned" | "notEnough" | "unknown" };
+
+export function buyClass(id: string, price: number): ShopResult {
+  if (typeof window === "undefined") return { ok: false, reason: "unknown" };
+  const session = readSession();
+  if (!session.name) return { ok: false, reason: "noSession" };
+  const accounts = readAccounts();
+  const a = accounts[session.name.toLowerCase()];
+  if (!a) return { ok: false, reason: "noSession" };
+  if (a.owned[id]) return { ok: false, reason: "alreadyOwned" };
+  if (a.totalEver < price) return { ok: false, reason: "notEnough" };
+  a.totalEver -= price;
+  a.owned[id] = true;
+  writeAccounts(accounts);
+  return { ok: true, account: a };
+}
+
+export function selectClass(id: string): ShopResult {
+  if (typeof window === "undefined") return { ok: false, reason: "unknown" };
+  const session = readSession();
+  if (!session.name) return { ok: false, reason: "noSession" };
+  const accounts = readAccounts();
+  const a = accounts[session.name.toLowerCase()];
+  if (!a) return { ok: false, reason: "noSession" };
+  if (!a.owned[id]) return { ok: false, reason: "alreadyOwned" }; // misnamed but means "not owned"
+  a.selectedClass = id;
+  writeAccounts(accounts);
+  return { ok: true, account: a };
+}
+
 export function saveGameResult(mode: "solo" | "duo" | "endless", result: GameResult) {
   if (typeof window === "undefined") return;
   const session = readSession();
