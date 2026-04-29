@@ -1,6 +1,6 @@
 import { Turtle } from "./Turtle";
 
-export function ModeIconSolo({ className = "w-24" }: { className?: string }) {
+export function ModeIconSolo({ className = "w-28" }: { className?: string }) {
   return (
     <div className={`relative ${className} flex items-center justify-center`}>
       <Turtle
@@ -10,16 +10,15 @@ export function ModeIconSolo({ className = "w-24" }: { className?: string }) {
         accent="#16a34a"
         pattern="hex"
         expression="happy"
-        className="w-full"
       />
     </div>
   );
 }
 
-export function ModeIconDuo({ className = "w-32" }: { className?: string }) {
+export function ModeIconDuo({ className = "w-40" }: { className?: string }) {
   return (
     <div className={`relative inline-flex items-center justify-center ${className}`}>
-      <div className="relative -mr-5 scale-[0.78]">
+      <div className="relative -mr-6 scale-90">
         <Turtle
           idKey="mode-duo-1"
           body="#4ade80"
@@ -29,7 +28,7 @@ export function ModeIconDuo({ className = "w-32" }: { className?: string }) {
           expression="happy"
         />
       </div>
-      <div className="relative -ml-5 scale-[0.78]">
+      <div className="relative -ml-6 scale-90">
         <Turtle
           idKey="mode-duo-2"
           body="#facc15"
@@ -43,7 +42,7 @@ export function ModeIconDuo({ className = "w-32" }: { className?: string }) {
   );
 }
 
-export function ModeIconEndless({ className = "w-24" }: { className?: string }) {
+export function ModeIconEndless({ className = "w-28" }: { className?: string }) {
   return (
     <div className={`relative ${className} flex items-center justify-center`}>
       <Turtle
@@ -54,12 +53,8 @@ export function ModeIconEndless({ className = "w-24" }: { className?: string }) 
         pattern="crystals"
         aura="cosmic"
         expression="sparkle"
-        className="w-full"
       />
-      <span
-        className="absolute top-0 right-0 text-2xl drop-shadow"
-        aria-hidden
-      >
+      <span className="absolute -top-1 -right-3 text-3xl drop-shadow" aria-hidden>
         ♾️
       </span>
     </div>
