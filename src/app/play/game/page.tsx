@@ -32,11 +32,9 @@ function GameInner() {
     );
   }
 
-  const mode = (searchParams.get("mode") ?? "solo") as "solo" | "duo" | "endless";
-
-  // For now only solo runs on the new TS engine.
-  // Duo + endless still go through the legacy iframe — they'll be ported next.
-  const useNewEngine = mode === "solo";
+  const modeParam = searchParams.get("mode");
+  const mode: "solo" | "duo" | "endless" =
+    modeParam === "duo" ? "duo" : modeParam === "endless" ? "endless" : "solo";
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-gradient-to-br from-lime-50 via-emerald-50 to-amber-50">
@@ -50,17 +48,9 @@ function GameInner() {
         ← Lobby
       </Link>
 
-      {useNewEngine ? (
-        <div className="relative z-10 min-h-screen flex items-center justify-center p-4">
-          <GameCanvas mode={mode} />
-        </div>
-      ) : (
-        <iframe
-          src={`/game.html?mode=${mode}`}
-          className="block w-full h-screen border-0 relative z-10"
-          title="Żarłoczne Żółwie"
-        />
-      )}
+      <div className="relative z-10 min-h-screen flex items-center justify-center p-4">
+        <GameCanvas mode={mode} />
+      </div>
     </main>
   );
 }

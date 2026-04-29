@@ -25,26 +25,44 @@ import { clamp, dist2, mulberry32, randRange } from "./util";
 
 export function createState(mode: Mode, seed = Date.now() & 0xffffffff): GameState {
   const rng = mulberry32(seed);
+  const turtles = [
+    {
+      id: "p1",
+      classId: "normal",
+      color: { body: "#4ade80", shell: "#22c55e", accent: "#16a34a" },
+      pos: { x: mode === "duo" ? MAP_W / 2 - 80 : MAP_W / 2, y: MAP_H / 2 },
+      vel: { x: 0, y: 0 },
+      facing: "down" as const,
+      isMoving: false,
+      score: 0,
+      lives: mode === "endless" ? 3 : 1,
+      combo: 0,
+      comboTimer: 0,
+      invulnUntil: 0,
+      magnetUntil: 0,
+    },
+  ];
+  if (mode === "duo") {
+    turtles.push({
+      id: "p2",
+      classId: "normal",
+      color: { body: "#facc15", shell: "#eab308", accent: "#fde047" },
+      pos: { x: MAP_W / 2 + 80, y: MAP_H / 2 },
+      vel: { x: 0, y: 0 },
+      facing: "down" as const,
+      isMoving: false,
+      score: 0,
+      lives: 1,
+      combo: 0,
+      comboTimer: 0,
+      invulnUntil: 0,
+      magnetUntil: 0,
+    });
+  }
   const state: GameState = {
     tick: 0,
     mode,
-    turtles: [
-      {
-        id: "p1",
-        classId: "normal",
-        color: { body: "#4ade80", shell: "#22c55e", accent: "#16a34a" },
-        pos: { x: MAP_W / 2, y: MAP_H / 2 },
-        vel: { x: 0, y: 0 },
-        facing: "down",
-        isMoving: false,
-        score: 0,
-        lives: 1,
-        combo: 0,
-        comboTimer: 0,
-        invulnUntil: 0,
-        magnetUntil: 0,
-      },
-    ],
+    turtles,
     lettuces: [],
     rocks: [],
     powerups: [],
@@ -205,6 +223,10 @@ function handleCollisions(state: GameState) {
         if (state.mode === "solo" && t.score >= SOLO_TARGET) {
           endGame(state, /*timeOut=*/ false);
         }
+        // In duo, first to reach target also ends the round
+        if (state.mode === "duo" && t.score >= SOLO_TARGET) {
+          endGame(state, /*timeOut=*/ false);
+        }
       }
     }
     // Rock
@@ -258,14 +280,18 @@ function spawnHitParticles(state: GameState, pos: { x: number; y: number }) {
 function endGame(state: GameState, timeOut: boolean) {
   if (state.ended) return;
   state.ended = true;
-  const score = state.turtles[0]?.score ?? 0;
+  // Score: max across players (duo = highest wins)
+  const score = Math.max(...state.turtles.map((t) => t.score), 0);
   const survivedSec = state.mode === "endless" ? Math.floor(state.tick / TICK_RATE) : undefined;
-  const won = state.mode === "solo" ? score >= SOLO_TARGET : !timeOut;
+  let won: boolean;
+  if (state.mode === "solo") won = score >= SOLO_TARGET;
+  else if (state.mode === "duo") won = !timeOut; // duo "wins" if they finish the timer
+  else won = false; // endless never "wins"
   state.result = {
     score,
     survivedSec,
     won,
-    lettuces: state.turtles[0]?.score ?? 0,
+    lettuces: score,
   };
 }
 
