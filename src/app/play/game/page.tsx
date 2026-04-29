@@ -5,7 +5,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { getCurrentSession } from "@/lib/auth";
 import { TurtleIcon } from "@/components/TurtleIcon";
-import { FallingSalads } from "@/components/FallingSalads";
 import { GameCanvas } from "@/components/GameCanvas";
 
 function GameInner() {
@@ -24,7 +23,7 @@ function GameInner() {
 
   if (!ready) {
     return (
-      <main className="relative min-h-screen flex items-center justify-center bg-gradient-to-br from-lime-50 via-emerald-50 to-amber-50">
+      <main className="fixed inset-0 flex items-center justify-center bg-gradient-to-br from-lime-50 via-emerald-50 to-amber-50">
         <div className="animate-turtle-bob">
           <TurtleIcon className="w-20 h-20" />
         </div>
@@ -37,21 +36,25 @@ function GameInner() {
     modeParam === "duo" ? "duo" : modeParam === "endless" ? "endless" : "solo";
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-gradient-to-br from-lime-50 via-emerald-50 to-amber-50">
-      <FallingSalads count={5} />
-
+    <>
       <Link
         href="/play"
-        className="fixed top-4 left-4 z-50 inline-flex items-center gap-2 rounded-full bg-emerald-700 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-emerald-700/30 hover:bg-emerald-800 transition"
+        className="fixed top-4 right-4 z-50 inline-flex items-center gap-2 rounded-full bg-white/85 backdrop-blur px-4 py-2 text-sm font-medium text-emerald-900 shadow-lg hover:bg-white transition"
+        style={{ display: "none" }}
       >
         <TurtleIcon className="w-5 h-5" />
-        ← Lobby
+        Lobby
       </Link>
-
-      <div className="relative z-10 min-h-screen flex items-center justify-center p-4">
-        <GameCanvas mode={mode} />
-      </div>
-    </main>
+      <GameCanvas mode={mode} />
+      {/* Discrete back-to-lobby button bottom-left */}
+      <Link
+        href="/play"
+        className="fixed bottom-4 left-4 z-50 inline-flex items-center gap-2 rounded-full bg-white/85 backdrop-blur px-4 py-2 text-sm font-medium text-emerald-900 shadow-lg hover:bg-white transition"
+      >
+        <TurtleIcon className="w-5 h-5" />
+        Lobby
+      </Link>
+    </>
   );
 }
 
@@ -59,7 +62,7 @@ export default function GamePage() {
   return (
     <Suspense
       fallback={
-        <main className="relative min-h-screen flex items-center justify-center bg-gradient-to-br from-lime-50 via-emerald-50 to-amber-50">
+        <main className="fixed inset-0 flex items-center justify-center bg-gradient-to-br from-lime-50 via-emerald-50 to-amber-50">
           <div className="animate-turtle-bob">
             <TurtleIcon className="w-20 h-20" />
           </div>

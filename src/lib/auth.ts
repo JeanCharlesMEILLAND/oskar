@@ -210,3 +210,35 @@ export function logout() {
   session.name = "";
   writeSession(session);
 }
+
+export type GameResult = {
+  score: number;
+  survivedSec?: number;
+  won: boolean;
+};
+
+export function saveGameResult(mode: "solo" | "duo" | "endless", result: GameResult) {
+  if (typeof window === "undefined") return;
+  const session = readSession();
+  if (!session.name) return;
+  const accounts = readAccounts();
+  const key = session.name.toLowerCase();
+  const a = accounts[key];
+  if (!a) return;
+
+  if (mode === "solo") a.soloBest = Math.max(a.soloBest, result.score);
+  else if (mode === "duo") a.duoBest = Math.max(a.duoBest, result.score);
+  else if (mode === "endless" && typeof result.survivedSec === "number") {
+    a.endlessBest = Math.max(a.endlessBest, result.survivedSec);
+  }
+
+  // 1 saladocoin per lettuce eaten
+  a.totalEver += result.score;
+  a.totalEverEaten += result.score;
+
+  // Stats
+  if (!a.stats) a.stats = { powerups: 0, gold: 0, wins: 0 };
+  if (result.won) a.stats.wins = (a.stats.wins ?? 0) + 1;
+
+  writeAccounts(accounts);
+}

@@ -2,10 +2,11 @@
 // Map decorations are deterministic from `state.mapSeed`, drawn once to an offscreen canvas.
 
 import type { GameState, Turtle, Lettuce, Rock, Particle } from "./types";
-import { COLORS, MAP_H, MAP_W, ROCK_RADIUS, TURTLE_RADIUS, VIEWPORT_H, VIEWPORT_W } from "./constants";
+import { COLORS, MAP_H, MAP_W, ROCK_RADIUS, TURTLE_RADIUS } from "./constants";
 import { clamp, lerp, mulberry32, randRange } from "./util";
 
 type Camera = { x: number; y: number };
+type Viewport = { w: number; h: number };
 
 let mapCache: HTMLCanvasElement | null = null;
 let cachedSeed: number | null = null;
@@ -189,9 +190,14 @@ function drawFlower(ctx: CanvasRenderingContext2D, x: number, y: number, color: 
 
 // =============== Public render entry point ===============
 
-export function render(ctx: CanvasRenderingContext2D, state: GameState, camera: Camera) {
-  const w = ctx.canvas.width;
-  const h = ctx.canvas.height;
+export function render(
+  ctx: CanvasRenderingContext2D,
+  state: GameState,
+  camera: Camera,
+  viewport: Viewport,
+) {
+  const w = viewport.w;
+  const h = viewport.h;
 
   if (mapCache === null || cachedSeed !== state.mapSeed) {
     mapCache = buildMapCache(state.mapSeed);
@@ -200,10 +206,8 @@ export function render(ctx: CanvasRenderingContext2D, state: GameState, camera: 
 
   ctx.save();
   ctx.clearRect(0, 0, w, h);
-  // Off-canvas background fill (in case camera goes outside map)
   ctx.fillStyle = COLORS.grassDark;
   ctx.fillRect(0, 0, w, h);
-  // Translate world so camera is centered on viewport
   ctx.translate(-camera.x, -camera.y);
 
   // Map
@@ -213,7 +217,8 @@ export function render(ctx: CanvasRenderingContext2D, state: GameState, camera: 
   const renderQueue: Array<{ y: number; draw: () => void }> = [];
   for (const r of state.rocks) renderQueue.push({ y: r.pos.y, draw: () => drawRock(ctx, r) });
   for (const l of state.lettuces) renderQueue.push({ y: l.pos.y, draw: () => drawLettuce(ctx, l) });
-  for (const t of state.turtles) renderQueue.push({ y: t.pos.y + 8, draw: () => drawTurtle(ctx, t, state.tick) });
+  for (const t of state.turtles)
+    renderQueue.push({ y: t.pos.y + 8, draw: () => drawTurtle(ctx, t, state.tick) });
   renderQueue.sort((a, b) => a.y - b.y);
   for (const item of renderQueue) item.draw();
 
@@ -223,17 +228,114 @@ export function render(ctx: CanvasRenderingContext2D, state: GameState, camera: 
   ctx.restore();
 
   // Vignette
-  const vg = ctx.createRadialGradient(w / 2, h / 2, h * 0.3, w / 2, h / 2, h * 0.85);
+  const vg = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.35, w / 2, h / 2, Math.max(w, h) * 0.7);
   vg.addColorStop(0, "rgba(0,0,0,0)");
   vg.addColorStop(1, COLORS.vignette);
   ctx.fillStyle = vg;
   ctx.fillRect(0, 0, w, h);
+
+  // Minimap (top-right)
+  drawMinimap(ctx, state, camera, viewport);
+}
+
+function drawMinimap(
+  ctx: CanvasRenderingContext2D,
+  state: GameState,
+  camera: Camera,
+  viewport: Viewport,
+) {
+  const padding = 16;
+  const mmW = Math.min(220, viewport.w * 0.22);
+  const mmH = (mmW * MAP_H) / MAP_W;
+  const mmX = viewport.w - mmW - padding;
+  const mmY = padding;
+
+  // Frame
+  ctx.save();
+  ctx.fillStyle = "rgba(15, 90, 50, 0.85)";
+  roundedRect(ctx, mmX - 6, mmY - 6, mmW + 12, mmH + 12, 12);
+  ctx.fill();
+  // Map background
+  ctx.fillStyle = COLORS.grass;
+  roundedRect(ctx, mmX, mmY, mmW, mmH, 6);
+  ctx.fill();
+  ctx.clip();
+
+  // Subtle dirt patches (decorative)
+  ctx.fillStyle = COLORS.dirt;
+  ctx.globalAlpha = 0.5;
+  ctx.fillRect(mmX + mmW * 0.12, mmY + mmH * 0.6, mmW * 0.08, mmH * 0.06);
+  ctx.fillRect(mmX + mmW * 0.7, mmY + mmH * 0.2, mmW * 0.1, mmH * 0.05);
+  ctx.globalAlpha = 1;
+
+  const sx = mmW / MAP_W;
+  const sy = mmH / MAP_H;
+
+  // Lettuces
+  ctx.fillStyle = "#bbf7d0";
+  for (const l of state.lettuces) {
+    if (l.isGold) ctx.fillStyle = "#fde047";
+    else ctx.fillStyle = "#86efac";
+    ctx.beginPath();
+    ctx.arc(mmX + l.pos.x * sx, mmY + l.pos.y * sy, l.isGold ? 2.2 : 1.6, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Rocks
+  ctx.fillStyle = COLORS.rockDark;
+  for (const r of state.rocks) {
+    ctx.beginPath();
+    ctx.arc(mmX + r.pos.x * sx, mmY + r.pos.y * sy, 1.6, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Camera viewport indicator
+  ctx.strokeStyle = "rgba(255,255,255,0.6)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(
+    mmX + camera.x * sx,
+    mmY + camera.y * sy,
+    viewport.w * sx,
+    viewport.h * sy,
+  );
+
+  // Turtles (drawn last, on top)
+  for (const t of state.turtles) {
+    const x = mmX + t.pos.x * sx;
+    const y = mmY + t.pos.y * sy;
+    ctx.fillStyle = t.color.shell;
+    ctx.beginPath();
+    ctx.arc(x, y, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "white";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+function roundedRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
 }
 
 export function clampCamera(camX: number, camY: number, viewW: number, viewH: number) {
   return {
-    x: clamp(camX, 0, MAP_W - viewW),
-    y: clamp(camY, 0, MAP_H - viewH),
+    x: clamp(camX, 0, Math.max(0, MAP_W - viewW)),
+    y: clamp(camY, 0, Math.max(0, MAP_H - viewH)),
   };
 }
 
@@ -246,7 +348,12 @@ export function lerpCameraToTurtle(
 ): Camera {
   const targetX = turtle.pos.x - viewW / 2;
   const targetY = turtle.pos.y - viewH / 2;
-  return clampCamera(lerp(current.x, targetX, alpha), lerp(current.y, targetY, alpha), viewW, viewH);
+  return clampCamera(
+    lerp(current.x, targetX, alpha),
+    lerp(current.y, targetY, alpha),
+    viewW,
+    viewH,
+  );
 }
 
 // =============== Entity drawing ===============
