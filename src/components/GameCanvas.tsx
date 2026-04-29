@@ -6,6 +6,7 @@ import { createState, tick, type GameState, type Inputs, type Mode } from "@/gam
 import { lerpCameraToTurtle, render } from "@/game/render";
 import { SFX } from "@/game/audio";
 import { getCurrentAccount, saveGameResult, type GameResult } from "@/lib/auth";
+import { getGameRoom, type GamePayload } from "@/lib/game-ws";
 
 type DirKey = "up" | "down" | "left" | "right";
 
@@ -63,9 +64,12 @@ function vectorFromDelta(nx: number, ny: number): Vec {
 export function GameCanvas({
   mode,
   onEnd,
+  room,
 }: {
   mode: Mode;
   onEnd?: (result: GameResult) => void;
+  /** If set, multiplayer mode against the connected room. */
+  room?: string | null;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const savedRef = useRef(false);
@@ -230,7 +234,13 @@ export function GameCanvas({
     window.addEventListener("orientationchange", updateSize);
 
     const account = getCurrentAccount();
-    // Duo: read ?friend= from URL to pick the friend's class for P2
+
+    // Multiplayer mode setup. We always play "duo" in a room (2 turtles).
+    const isMultiplayer = !!room && !!account;
+    const gameRoom = isMultiplayer ? getGameRoom(account!.name) : null;
+    const isHost = gameRoom?.state.isHost ?? true;
+
+    // Build state — for multiplayer hosts and single-player. Clients overwrite from received state.
     let p2ClassId = "normal";
     if (mode === "duo" && typeof window !== "undefined") {
       const urlFriend = new URLSearchParams(window.location.search).get("friend");
@@ -245,10 +255,108 @@ export function GameCanvas({
         } catch {}
       }
     }
-    const state: GameState = createState(mode, {
+    const effectiveMode: Mode = isMultiplayer ? "duo" : mode;
+    let state: GameState = createState(effectiveMode, {
       selectedClassId: account?.selectedClass ?? "normal",
       p2ClassId,
     });
+
+    // Player → turtle mapping for multiplayer.
+    // Convention: host = p1 (green), first remote player = p2 (yellow).
+    const playerToTurtle = new Map<string, string>(); // nameLower → turtleId
+    const remoteInputs = new Map<string, { dx: -1 | 0 | 1; dy: -1 | 0 | 1 }>();
+    let mpUnsub: (() => void) | null = null;
+    let stateBroadcastTimer: ReturnType<typeof setInterval> | null = null;
+
+    if (isMultiplayer && gameRoom && account) {
+      const myLower = account.name.toLowerCase();
+      // Host announces start with the seed so clients build the same map
+      if (isHost) {
+        // First two players in room → p1, p2 mapping
+        const players = gameRoom.state.players.slice(0, 2);
+        for (let i = 0; i < players.length; i++) {
+          playerToTurtle.set(players[i].toLowerCase(), i === 0 ? "p1" : "p2");
+        }
+        // Broadcast start info so clients init their canvas with same seed
+        gameRoom.broadcast({
+          kind: "start",
+          seed: state.mapSeed,
+          mode: "duo",
+        });
+        // Re-broadcast every second for late joiners
+        const startTimer = setInterval(() => {
+          if (state.ended) return;
+          gameRoom.broadcast({
+            kind: "start",
+            seed: state.mapSeed,
+            mode: "duo",
+          });
+        }, 1000);
+        // Periodic state broadcast to clients (15Hz)
+        stateBroadcastTimer = setInterval(() => {
+          // Send a serializable snapshot (rng is a function, JSON.stringify drops it automatically)
+          gameRoom.broadcast({ kind: "state", tick: state.tick, data: state as unknown as object });
+        }, 67);
+        mpUnsub = gameRoom.onMessage((m: { from: string; payload: GamePayload }) => {
+          if (m.payload.kind === "input") {
+            const fromLower = m.from.toLowerCase();
+            if (!playerToTurtle.has(fromLower) && playerToTurtle.size < 2) {
+              playerToTurtle.set(fromLower, "p2");
+            }
+            remoteInputs.set(fromLower, { dx: m.payload.dx, dy: m.payload.dy });
+          }
+        });
+        // Cleanup of startTimer
+        const prev = stateBroadcastTimer;
+        stateBroadcastTimer = ({
+          unref() {},
+          // hack to share cleanup
+        } as unknown) as ReturnType<typeof setInterval>;
+        const compoundCleanup = () => {
+          clearInterval(prev as unknown as ReturnType<typeof setInterval>);
+          clearInterval(startTimer);
+        };
+        // Override unsub to also clean timers
+        const prevUnsub = mpUnsub;
+        mpUnsub = () => {
+          prevUnsub?.();
+          compoundCleanup();
+        };
+      } else {
+        // Client: wait for "start" message to know the seed, then "state" messages to render.
+        let started = false;
+        mpUnsub = gameRoom.onMessage((m: { from: string; payload: GamePayload }) => {
+          if (m.payload.kind === "start" && !started) {
+            state = createState("duo", {
+              selectedClassId: account.selectedClass,
+              p2ClassId,
+              seed: m.payload.seed,
+            });
+            started = true;
+          } else if (m.payload.kind === "state") {
+            const snapshot = m.payload.data as unknown as GameState;
+            const oldRng = state.rng;
+            state = { ...snapshot, rng: oldRng };
+          }
+        });
+        // Send my input to the host at 30Hz
+        const inputTimer = setInterval(() => {
+          const myV = resolveVec(p1Map);
+          gameRoom.broadcast({
+            kind: "input",
+            dx: myV.dx,
+            dy: myV.dy,
+            action: false,
+            from: account.name,
+          });
+        }, 33);
+        const prevUnsub2 = mpUnsub;
+        mpUnsub = () => {
+          prevUnsub2?.();
+          clearInterval(inputTimer);
+        };
+      }
+    }
     const inputs: Inputs = {};
     const keysDown = new Set<string>();
     let camera = {
@@ -304,13 +412,31 @@ export function GameCanvas({
       accumulator += Math.min(dt, 0.25);
 
       while (accumulator >= TICK_DT) {
+        if (isMultiplayer && !isHost) {
+          // Client: don't run engine.tick. Just consume the accumulator (state comes from network).
+          accumulator -= TICK_DT;
+          continue;
+        }
+
         const k1 = resolveVec(p1Map);
         const v1 = combineWithJoy(k1, p1JoyVecRef.current);
-        inputs.p1 = { dx: v1.dx, dy: v1.dy, action: false };
-        if (p2Map) {
-          const k2 = resolveVec(p2Map);
-          const v2 = combineWithJoy(k2, p2JoyVecRef.current);
-          inputs.p2 = { dx: v2.dx, dy: v2.dy, action: false };
+
+        if (isMultiplayer && isHost && account) {
+          // Host: own input → host's turtle (p1). Apply remote inputs to mapped turtles.
+          inputs.p1 = { dx: v1.dx, dy: v1.dy, action: false };
+          for (const [nameLower, vec] of remoteInputs) {
+            const turtleId = playerToTurtle.get(nameLower);
+            if (!turtleId || turtleId === "p1") continue;
+            inputs[turtleId] = { dx: vec.dx, dy: vec.dy, action: false };
+          }
+        } else {
+          // Single-player path
+          inputs.p1 = { dx: v1.dx, dy: v1.dy, action: false };
+          if (p2Map) {
+            const k2 = resolveVec(p2Map);
+            const v2 = combineWithJoy(k2, p2JoyVecRef.current);
+            inputs.p2 = { dx: v2.dx, dy: v2.dy, action: false };
+          }
         }
         tick(state, inputs);
         accumulator -= TICK_DT;
@@ -367,8 +493,10 @@ export function GameCanvas({
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("resize", updateSize);
       window.removeEventListener("orientationchange", updateSize);
+      if (stateBroadcastTimer) clearInterval(stateBroadcastTimer);
+      mpUnsub?.();
     };
-  }, [mode, onEnd]);
+  }, [mode, onEnd, room]);
 
   return (
     <div

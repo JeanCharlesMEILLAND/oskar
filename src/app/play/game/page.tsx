@@ -32,8 +32,14 @@ function GameInner() {
   }
 
   const modeParam = searchParams.get("mode");
-  const mode: "solo" | "duo" | "endless" =
-    modeParam === "duo" ? "duo" : modeParam === "endless" ? "endless" : "solo";
+  const room = searchParams.get("room");
+  const mode: "solo" | "duo" | "endless" = room
+    ? "duo"
+    : modeParam === "duo"
+      ? "duo"
+      : modeParam === "endless"
+        ? "endless"
+        : "solo";
 
   return (
     <>
@@ -45,7 +51,7 @@ function GameInner() {
         <TurtleIcon className="w-5 h-5" />
         Lobby
       </Link>
-      <GameCanvas mode={mode} />
+      <GameCanvas mode={mode} room={room} />
       {/* Back-to-lobby button — top-center on mobile (avoids minimap top-right and
           joysticks at bottom). Sits between score cards (left) and minimap (right). */}
       <Link
