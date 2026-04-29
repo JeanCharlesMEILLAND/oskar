@@ -812,10 +812,13 @@ function CodePrompt({
         <input
           value={code}
           onChange={(e) => {
-            setCode(e.target.value.toUpperCase());
+            setCode(e.target.value);
             setFeedback(null);
           }}
           autoFocus
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
           placeholder={lang === "pl" ? "wpisz kod..." : "tape ton code..."}
           maxLength={20}
           className={`w-full rounded-2xl border-2 px-4 py-3 text-center text-xl font-mono tracking-wider outline-none transition ${
