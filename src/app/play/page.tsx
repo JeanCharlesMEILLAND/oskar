@@ -31,6 +31,7 @@ import {
   stopEvent,
   type EventState,
 } from "@/lib/events";
+import { getGameRoom, type RoomState } from "@/lib/game-ws";
 
 const TOTAL_CLASSES = 34;
 const TOTAL_MEDALS = 16;
@@ -44,6 +45,7 @@ export default function LobbyPage() {
   const [event, setEvent] = useState<EventState>({ active: false, type: null, endsAt: 0 });
   const [showAdminPrompt, setShowAdminPrompt] = useState(false);
   const [showDuoPicker, setShowDuoPicker] = useState(false);
+  const [showMultiplayer, setShowMultiplayer] = useState(false);
 
   useEffect(() => {
     const a = getCurrentAccount();
@@ -228,6 +230,14 @@ export default function LobbyPage() {
           />
         )}
 
+        {showMultiplayer && (
+          <MultiplayerModal
+            myName={account.name}
+            onClose={() => setShowMultiplayer(false)}
+            onStart={(code) => router.push(`/play/game?room=${encodeURIComponent(code)}`)}
+          />
+        )}
+
         {showDuoPicker && (
           <DuoFriendPicker
             friends={account.friends ?? []}
@@ -248,7 +258,7 @@ export default function LobbyPage() {
           <div className="grid gap-4 md:gap-5 grid-cols-1 sm:grid-cols-3">
             <ModeCard
               href="/play/game?mode=solo"
-              icon={<ModeIconSolo className="w-24" />}
+              icon={<ModeIconSolo />}
               title={t("lobby.modeSolo.t")}
               desc={t("lobby.modeSolo.d")}
               best={account.soloBest > 0 ? `🏆 ${account.soloBest}` : undefined}
@@ -260,7 +270,7 @@ export default function LobbyPage() {
                 if ((account.friends?.length ?? 0) > 0) setShowDuoPicker(true);
                 else router.push("/play/game?mode=duo");
               }}
-              icon={<ModeIconDuo className="w-32" />}
+              icon={<ModeIconDuo />}
               title={t("lobby.modeDuo.t")}
               desc={t("lobby.modeDuo.d")}
               best={account.duoBest > 0 ? `🏆 ${account.duoBest}` : undefined}
@@ -269,7 +279,7 @@ export default function LobbyPage() {
             />
             <ModeCard
               href="/play/game?mode=endless"
-              icon={<ModeIconEndless className="w-24" />}
+              icon={<ModeIconEndless />}
               title={t("lobby.modeEndless.t")}
               desc={t("lobby.modeEndless.d")}
               best={account.endlessBest > 0 ? `🏆 ${account.endlessBest}s` : undefined}
@@ -277,6 +287,28 @@ export default function LobbyPage() {
               ring="ring-violet-300"
             />
           </div>
+
+          {/* Multiplayer button */}
+          <button
+            type="button"
+            onClick={() => setShowMultiplayer(true)}
+            className="mt-4 w-full rounded-3xl border-2 border-dashed border-pink-300 bg-gradient-to-r from-pink-50 via-fuchsia-50 to-amber-50 p-4 sm:p-5 hover:border-pink-400 hover:shadow-lg transition flex items-center justify-center gap-3"
+          >
+            <span className="text-2xl sm:text-3xl">🎮</span>
+            <div className="text-left">
+              <p className="font-[var(--font-fraunces)] text-base sm:text-lg font-semibold text-emerald-950">
+                {lang === "pl" ? "Multiplayer ze znajomym" : "Multijoueur en ligne"}
+                <span className="ml-2 text-[10px] uppercase tracking-widest text-pink-700 bg-pink-100 px-2 py-0.5 rounded-full align-middle">
+                  BETA
+                </span>
+              </p>
+              <p className="text-xs sm:text-sm text-emerald-900/65">
+                {lang === "pl"
+                  ? "Stwórz pokój → wyślij kod znajomemu → grajcie razem"
+                  : "Crée une partie → envoie le code → jouez ensemble en temps réel"}
+              </p>
+            </div>
+          </button>
         </div>
 
         {/* Current class + Quick links */}
@@ -345,6 +377,257 @@ export default function LobbyPage() {
         </Link>
       </section>
     </main>
+  );
+}
+
+// =============== Multiplayer modal ===============
+function MultiplayerModal({
+  myName,
+  onClose,
+  onStart,
+}: {
+  myName: string;
+  onClose: () => void;
+  onStart: (code: string) => void;
+}) {
+  const { lang } = useT();
+  const [tab, setTab] = useState<"create" | "join">("create");
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [room, setRoom] = useState<RoomState>({ code: null, isHost: false, players: [] });
+
+  // Subscribe to room state updates
+  useEffect(() => {
+    const r = getGameRoom(myName);
+    return r.onRoomChange(setRoom);
+  }, [myName]);
+
+  const handleCreate = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = getGameRoom(myName);
+      if (!r.isOpen()) throw new Error("ws_offline");
+      await r.create();
+    } catch (e) {
+      setErr(
+        lang === "pl"
+          ? "Serwer multiplayer offline"
+          : "Serveur multijoueur hors ligne",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleJoin = async () => {
+    const c = code.trim().toUpperCase();
+    if (!c) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = getGameRoom(myName);
+      if (!r.isOpen()) throw new Error("ws_offline");
+      await r.join(c);
+    } catch (e: unknown) {
+      const reason = e instanceof Error ? e.message : "unknown";
+      setErr(
+        reason === "room_not_found"
+          ? lang === "pl" ? "Pokój nie istnieje" : "Room introuvable"
+          : reason === "room_full"
+            ? lang === "pl" ? "Pokój pełny" : "Room pleine"
+            : lang === "pl" ? "Błąd połączenia" : "Erreur de connexion",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleLeave = () => {
+    getGameRoom(myName).leave();
+  };
+
+  // If we're in a room → show waiting screen
+  if (room.code) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-emerald-950/60 backdrop-blur-sm p-4">
+        <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
+          <div className="flex items-start justify-between mb-4">
+            <p className="font-[var(--font-fraunces)] text-2xl font-semibold text-emerald-950">
+              🎮 {lang === "pl" ? "Pokój gotowy" : "Room prête"}
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                handleLeave();
+                onClose();
+              }}
+              className="rounded-full bg-zinc-100 hover:bg-zinc-200 transition w-9 h-9 flex items-center justify-center text-zinc-700"
+            >
+              ✗
+            </button>
+          </div>
+          <p className="text-sm text-emerald-900/70 mb-3">
+            {lang === "pl"
+              ? "Wyślij ten kod znajomemu (np. przez Chat Żółwiowy) :"
+              : "Envoie ce code à un ami (via Chat Żółwiowy) :"}
+          </p>
+          <div className="my-4 rounded-3xl bg-gradient-to-br from-emerald-50 to-amber-50 border-2 border-emerald-300 py-6 text-center">
+            <p className="font-mono text-5xl sm:text-6xl font-bold text-emerald-700 tracking-[0.4em]">
+              {room.code}
+            </p>
+          </div>
+          <p className="text-xs uppercase tracking-widest text-emerald-700/70 mb-2">
+            {lang === "pl" ? "Gracze" : "Joueurs"} ({room.players.length}/4)
+          </p>
+          <ul className="space-y-2 mb-5">
+            {room.players.map((name, i) => (
+              <li
+                key={name}
+                className="flex items-center gap-3 rounded-2xl bg-emerald-50/60 px-4 py-2.5"
+              >
+                <div className="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center">
+                  🐢
+                </div>
+                <span className="flex-1 font-medium text-emerald-950">{name}</span>
+                {i === 0 && (
+                  <span className="text-[10px] uppercase tracking-widest text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
+                    HOST
+                  </span>
+                )}
+              </li>
+            ))}
+            {room.players.length < 2 && (
+              <li className="text-center text-sm text-emerald-900/55 italic py-2">
+                {lang === "pl"
+                  ? "Czekam na drugiego gracza..."
+                  : "En attente d'un second joueur..."}
+              </li>
+            )}
+          </ul>
+          <div className="flex flex-col gap-2">
+            {room.isHost ? (
+              <button
+                type="button"
+                onClick={() => onStart(room.code!)}
+                disabled={room.players.length < 2}
+                className="rounded-full bg-emerald-700 text-white px-5 py-3 font-medium hover:bg-emerald-800 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                {lang === "pl" ? "Start →" : "Démarrer →"}
+              </button>
+            ) : (
+              <p className="text-center text-sm text-emerald-900/65">
+                {lang === "pl" ? "Czekamy aż host wystartuje..." : "On attend que l'hôte lance..."}
+              </p>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                handleLeave();
+                onClose();
+              }}
+              className="rounded-full border border-zinc-300 px-5 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 transition"
+            >
+              {lang === "pl" ? "Anuluj" : "Annuler"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Otherwise: create/join chooser
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-emerald-950/60 backdrop-blur-sm p-4">
+      <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
+        <div className="flex items-start justify-between mb-5">
+          <p className="font-[var(--font-fraunces)] text-2xl font-semibold text-emerald-950">
+            🎮 {lang === "pl" ? "Multiplayer" : "Multijoueur"}
+          </p>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full bg-zinc-100 hover:bg-zinc-200 transition w-9 h-9 flex items-center justify-center text-zinc-700"
+          >
+            ✗
+          </button>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex p-1 bg-emerald-100/60 rounded-full mb-5">
+          <button
+            type="button"
+            onClick={() => setTab("create")}
+            className={`flex-1 px-3 py-2 text-sm font-medium rounded-full transition ${
+              tab === "create" ? "bg-emerald-700 text-white shadow-sm" : "text-emerald-900/60"
+            }`}
+          >
+            {lang === "pl" ? "Stwórz pokój" : "Créer"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab("join")}
+            className={`flex-1 px-3 py-2 text-sm font-medium rounded-full transition ${
+              tab === "join" ? "bg-emerald-700 text-white shadow-sm" : "text-emerald-900/60"
+            }`}
+          >
+            {lang === "pl" ? "Dołącz" : "Rejoindre"}
+          </button>
+        </div>
+
+        {tab === "create" ? (
+          <div>
+            <p className="text-sm text-emerald-900/70 mb-4">
+              {lang === "pl"
+                ? "Stworzysz prywatny pokój i otrzymasz 4-literowy kod do udostępnienia."
+                : "Crée une partie privée et reçois un code à 4 lettres à partager."}
+            </p>
+            <button
+              type="button"
+              onClick={handleCreate}
+              disabled={busy}
+              className="w-full rounded-full bg-emerald-700 text-white px-5 py-3 font-medium hover:bg-emerald-800 disabled:opacity-40 transition"
+            >
+              {busy
+                ? lang === "pl" ? "Tworzę..." : "Création..."
+                : lang === "pl" ? "🎲 Stwórz pokój" : "🎲 Créer la partie"}
+            </button>
+          </div>
+        ) : (
+          <div>
+            <p className="text-sm text-emerald-900/70 mb-3">
+              {lang === "pl" ? "Wpisz kod 4-literowy :" : "Entre le code à 4 lettres :"}
+            </p>
+            <input
+              value={code}
+              onChange={(e) => setCode(e.target.value.toUpperCase().slice(0, 4))}
+              placeholder="ABCD"
+              maxLength={4}
+              autoCapitalize="characters"
+              autoCorrect="off"
+              spellCheck={false}
+              className="w-full rounded-2xl border-2 border-emerald-100 bg-white px-4 py-3 text-center text-3xl font-mono font-bold tracking-[0.5em] text-emerald-950 outline-none focus:border-emerald-500 transition mb-4"
+              autoFocus
+            />
+            <button
+              type="button"
+              onClick={handleJoin}
+              disabled={busy || code.length < 4}
+              className="w-full rounded-full bg-emerald-700 text-white px-5 py-3 font-medium hover:bg-emerald-800 disabled:opacity-40 transition"
+            >
+              {busy ? "..." : lang === "pl" ? "Dołącz →" : "Rejoindre →"}
+            </button>
+          </div>
+        )}
+
+        {err && (
+          <p className="mt-4 rounded-2xl bg-rose-50 border border-rose-200 px-4 py-2.5 text-sm text-rose-800 text-center">
+            {err}
+          </p>
+        )}
+      </div>
+    </div>
   );
 }
 
