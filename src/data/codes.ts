@@ -18,6 +18,10 @@ export type CodeReward = {
   admin?: boolean;
   /** If true, all 34 classes get unlocked. */
   unlockAllClasses?: boolean;
+  /** If true, all 15 achievements (medals) are unlocked. */
+  unlockAllAchievements?: boolean;
+  /** If set, raises totalEverEaten (XP) to at least this value. 50000+ = max level (100). */
+  setMinXp?: number;
   /** Display label in the success toast. */
   label: { pl: string; fr: string };
 };
@@ -60,13 +64,15 @@ export const CODES: Record<string, CodeReward> = {
     reset: true,
     label: { pl: "🔄 RESTART! Konto wyczyszczone", fr: "🔄 RESTART ! Compte réinitialisé" },
   },
-  // Master cheat — admin + nieskończone monety + wszystkie klasy odblokowane
+  // Master cheat — admin + ∞ monety + wszystkie klasy + wszystkie odznaki + max level
   adminoskar1973: {
     id: "adminoskar1973",
     repeatable: true,
     setCoins: 999_999_999,
     admin: true,
     unlockAllClasses: true,
+    unlockAllAchievements: true,
+    setMinXp: 100_000, // 50000 wystarczy do level 100, dajemy zapas
     label: {
       pl: "💎 ADMIN OSKAR! Wszystko odblokowane ♾️",
       fr: "💎 ADMIN OSKAR ! Tout débloqué ♾️",
