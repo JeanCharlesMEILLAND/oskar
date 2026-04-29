@@ -10,6 +10,8 @@ export type CodeReward = {
   classes?: string[];
   /** If true, the code can be redeemed unlimited times (cheat code). Otherwise once per account. */
   repeatable?: boolean;
+  /** If true, this code RESETS the account: 0 coins, 0 records, no classes, no medals, no daily progress. */
+  reset?: boolean;
   /** Display label in the success toast. */
   label: { pl: string; fr: string };
 };
@@ -44,5 +46,12 @@ export const CODES: Record<string, CodeReward> = {
     coins: 1000,
     repeatable: true,
     label: { pl: "🎮 MINECRAFT! +1000 🥬", fr: "🎮 MINECRAFT ! +1000 🥬" },
+  },
+  // Reset code — czyści sałatomonety, klasy, rekordy, odznaki, daily. Konto/imię/znajomi zostają.
+  restart: {
+    id: "restart",
+    repeatable: true,
+    reset: true,
+    label: { pl: "🔄 RESTART! Konto wyczyszczone", fr: "🔄 RESTART ! Compte réinitialisé" },
   },
 };

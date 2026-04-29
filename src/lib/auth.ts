@@ -255,6 +255,21 @@ export function tryRedeemCode(rawCode: string): RedeemResult {
   // Mark only one-shot codes; repeatable codes can be redeemed unlimited times
   if (!reward.repeatable) a.redeemed[reward.id] = true;
 
+  // Full reset: wipe stats but keep identity (name/password/friends/avatar)
+  if (reward.reset) {
+    a.totalEver = 0;
+    a.totalEverEaten = 0;
+    a.soloBest = 0;
+    a.duoBest = 0;
+    a.endlessBest = 0;
+    a.owned = { normal: true };
+    a.selectedClass = "normal";
+    a.ach = {};
+    a.stats = { powerups: 0, gold: 0, wins: 0 };
+    a.daily = { day: todayKey(), progress: 0, claimed: false };
+    a.redeemed = {}; // re-enable one-shot codes
+  }
+
   if (reward.coins) {
     a.totalEver += reward.coins;
     a.totalEverEaten += reward.coins;
