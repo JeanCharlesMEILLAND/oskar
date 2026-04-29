@@ -135,7 +135,7 @@ export default function ProfilePage() {
         <div className="mt-6 grid gap-3 grid-cols-2 sm:grid-cols-4">
           <Stat icon="🥬" label={t("lobby.coins")} value={account.totalEver.toLocaleString()} />
           <Stat icon="🏆" label={t("lobby.bestSolo")} value={account.soloBest} />
-          <Stat icon="👥" label={t("lobby.bestDuo")} value={account.duoBest} />
+          <Stat icon="🐢🐢" label={t("lobby.bestDuo")} value={account.duoBest} />
           <Stat icon="♾️" label={t("lobby.bestEndless")} value={`${account.endlessBest}s`} />
         </div>
 

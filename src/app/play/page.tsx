@@ -329,7 +329,7 @@ export default function LobbyPage() {
           <QuickLink href="/shop" emoji="🛒" label={t("lobby.shop")} />
           <QuickLink href="/achievements" emoji="🏅" label={t("lobby.achievements")} />
           <QuickLink href="/profil" emoji="👤" label={t("lobby.profile")} />
-          <QuickLink href="/znajomi" emoji="👥" label={t("lobby.friends")} />
+          <QuickLink href="/znajomi" emoji="🐢🐢" label={t("lobby.friends")} />
         </div>
 
         {/* Big play CTA — defaults to solo. Smaller on mobile, respects notches. */}
@@ -404,7 +404,7 @@ function DuoFriendPicker({
       <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
         <div className="flex items-start justify-between mb-4">
           <p className="font-[var(--font-fraunces)] text-2xl font-semibold text-emerald-950">
-            👥 {lang === "pl" ? "Z kim grasz?" : "Avec qui ?"}
+            🐢🐢 {lang === "pl" ? "Z kim grasz?" : "Avec qui ?"}
           </p>
           <button
             type="button"

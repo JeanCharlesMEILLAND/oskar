@@ -80,16 +80,16 @@ export default function FriendsPage() {
       <section className="relative z-10 mx-auto max-w-4xl px-4 md:px-6 pb-24">
         <div className="text-center mb-6 md:mb-8">
           <h1 className="font-[var(--font-fraunces)] text-4xl sm:text-5xl md:text-6xl font-semibold leading-[0.95] tracking-tight text-emerald-950">
-            {t("friends.title")} 👥
+            {t("friends.title")} 🐢🐢
           </h1>
           <p className="mt-3 text-sm md:text-base text-emerald-900/65 max-w-xl mx-auto px-2">
             {t("friends.subtitle")}
           </p>
         </div>
 
-        {/* Local-only notice */}
-        <div className="mb-6 rounded-2xl bg-amber-50 border border-amber-200 px-4 py-3 text-center text-xs sm:text-sm text-amber-900">
-          ⚠️ {t("friends.localOnly")}
+        {/* Server status banner */}
+        <div className="mb-6 rounded-2xl bg-emerald-50 border border-emerald-200 px-4 py-3 text-center text-xs sm:text-sm text-emerald-900">
+          {t("friends.localOnly")}
         </div>
 
         {/* Tabs */}
