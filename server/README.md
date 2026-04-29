@@ -1,5 +1,7 @@
 # Żarłoczne Żółwie — WebSocket server
 
+> Auto-deployed via GitHub Actions on push to main when `server/**` changes.
+
 Real-time chat over WebSocket, persisted to Neon. Lives on the VPS, fronted by
 nginx with TLS via Let's Encrypt.
 
