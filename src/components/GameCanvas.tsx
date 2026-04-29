@@ -73,6 +73,7 @@ export function GameCanvas({
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const savedRef = useRef(false);
+  const multiplayerRestartRef = useRef<(() => void) | null>(null);
 
   // Joystick refs (mutated by touch handlers, read by the game loop)
   const p1JoyVecRef = useRef<Vec>({ dx: 0, dy: 0 });
@@ -292,11 +293,13 @@ export function GameCanvas({
             mode: "duo",
           });
         }, 1000);
-        // Periodic state broadcast to clients (15Hz)
+        // Periodic state broadcast to clients (20Hz — good middle ground for mobile bandwidth).
+        // Strip particles + events (visual-only / one-shot) to save 30-50% per snapshot.
         stateBroadcastTimer = setInterval(() => {
-          // Send a serializable snapshot (rng is a function, JSON.stringify drops it automatically)
-          gameRoom.broadcast({ kind: "state", tick: state.tick, data: state as unknown as object });
-        }, 67);
+          const snapshot = { ...state, particles: [], events: [] };
+          // rng is a function, JSON.stringify drops it automatically
+          gameRoom.broadcast({ kind: "state", tick: state.tick, data: snapshot as unknown as object });
+        }, 50);
         mpUnsub = gameRoom.onMessage((m: { from: string; payload: GamePayload }) => {
           if (m.payload.kind === "input") {
             const fromLower = m.from.toLowerCase();
@@ -339,9 +342,15 @@ export function GameCanvas({
             state = { ...snapshot, rng: oldRng };
           }
         });
-        // Send my input to the host at 30Hz
+        // Send my input to the host at 60Hz (mirrors local tick rate)
+        let lastSentDx: number | null = null;
+        let lastSentDy: number | null = null;
         const inputTimer = setInterval(() => {
-          const myV = resolveVec(p1Map);
+          const myV = combineWithJoy(resolveVec(p1Map), p1JoyVecRef.current);
+          // Only broadcast on change to save bandwidth
+          if (myV.dx === lastSentDx && myV.dy === lastSentDy) return;
+          lastSentDx = myV.dx;
+          lastSentDy = myV.dy;
           gameRoom.broadcast({
             kind: "input",
             dx: myV.dx,
@@ -349,7 +358,7 @@ export function GameCanvas({
             action: false,
             from: account.name,
           });
-        }, 33);
+        }, 16);
         const prevUnsub2 = mpUnsub;
         mpUnsub = () => {
           prevUnsub2?.();
@@ -476,13 +485,46 @@ export function GameCanvas({
       if (state.ended && state.result) {
         if (!savedRef.current) {
           savedRef.current = true;
-          saveGameResult(mode, state.result);
+          if (isMultiplayer) {
+            // Each player saves only their own turtle's score.
+            const myTurtleId = isHost ? "p1" : "p2";
+            const myTurtle = state.turtles.find((t) => t.id === myTurtleId);
+            if (myTurtle) {
+              saveGameResult("duo", {
+                score: myTurtle.score,
+                won: myTurtle.score >= 10,
+                maxCombo: myTurtle.maxCombo,
+                goldEaten: myTurtle.goldEaten,
+                powerupsPicked: myTurtle.powerupsPicked,
+                combo3Count: myTurtle.combo3Count,
+                gotHit: myTurtle.gotHit,
+                durationSec: state.result.durationSec,
+              });
+            }
+          } else {
+            saveGameResult(mode, state.result);
+          }
         }
         setEndResult(state.result);
         onEnd?.(state.result);
       } else if (!stopped) {
         raf = requestAnimationFrame(loop);
       }
+    };
+
+    // Expose a restart hook for multiplayer host (called by EndOverlay button).
+    // Resets state with a new seed and broadcasts a fresh "start" so all clients re-init.
+    multiplayerRestartRef.current = () => {
+      if (!isMultiplayer || !isHost || !account || !gameRoom) return;
+      const newSeed = Date.now() & 0xffffffff;
+      state = createState("duo", {
+        selectedClassId: account.selectedClass,
+        p2ClassId,
+        seed: newSeed,
+      });
+      savedRef.current = false;
+      setEndResult(null);
+      gameRoom.broadcast({ kind: "start", seed: newSeed, mode: "duo" });
     };
     raf = requestAnimationFrame(loop);
 
@@ -638,12 +680,32 @@ export function GameCanvas({
         )}
       </div>
 
-      {endResult && <EndOverlay result={endResult} mode={mode} />}
+      {endResult && (
+        <EndOverlay
+          result={endResult}
+          mode={mode}
+          isMultiplayer={!!room}
+          isHost={room ? !!getCurrentAccount() : true}
+          onRestart={() => multiplayerRestartRef.current?.()}
+        />
+      )}
     </div>
   );
 }
 
-function EndOverlay({ result, mode }: { result: GameResult; mode: Mode }) {
+function EndOverlay({
+  result,
+  mode,
+  isMultiplayer,
+  isHost,
+  onRestart,
+}: {
+  result: GameResult;
+  mode: Mode;
+  isMultiplayer: boolean;
+  isHost: boolean;
+  onRestart: () => void;
+}) {
   return (
     <div className="absolute inset-0 flex items-center justify-center bg-emerald-950/80 backdrop-blur-sm animate-[fadeIn_0.3s] px-4">
       <div className="rounded-3xl bg-white/95 p-6 sm:p-8 max-w-sm w-full text-center shadow-2xl pointer-events-auto">
@@ -660,12 +722,27 @@ function EndOverlay({ result, mode }: { result: GameResult; mode: Mode }) {
         </p>
         <p className="text-emerald-700 text-sm mb-5">+{result.score} 🥬 zapisane</p>
         <div className="flex flex-col gap-2">
-          <button
-            onClick={() => location.reload()}
-            className="rounded-full bg-emerald-700 px-6 py-3 text-white font-medium hover:bg-emerald-800 transition"
-          >
-            Jeszcze raz →
-          </button>
+          {isMultiplayer ? (
+            isHost ? (
+              <button
+                onClick={onRestart}
+                className="rounded-full bg-emerald-700 px-6 py-3 text-white font-medium hover:bg-emerald-800 transition"
+              >
+                Jeszcze raz →
+              </button>
+            ) : (
+              <p className="text-sm text-emerald-900/65 italic py-2">
+                Czekamy aż host wystartuje nową grę...
+              </p>
+            )
+          ) : (
+            <button
+              onClick={() => location.reload()}
+              className="rounded-full bg-emerald-700 px-6 py-3 text-white font-medium hover:bg-emerald-800 transition"
+            >
+              Jeszcze raz →
+            </button>
+          )}
           <a
             href="/play"
             className="rounded-full border border-emerald-300 px-6 py-3 text-emerald-800 font-medium hover:bg-emerald-50 transition"
