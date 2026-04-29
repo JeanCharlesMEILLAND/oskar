@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { getCurrentSession } from "@/lib/auth";
 import { getMessages as lsGetMessages, type Message } from "@/lib/friends";
-import { fetchMessages, postMessage, isApiHealthy } from "@/lib/chat";
+import { fetchMessages, postMessage, isApiHealthy, isWsConnected, subscribeToThread } from "@/lib/chat";
 import { TurtleIcon } from "./TurtleIcon";
 
 const MSG_PREFIX = "zolwie:msg:";
@@ -237,16 +237,16 @@ function Thread({
 }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [text, setText] = useState("");
-  const [healthy, setHealthy] = useState(true);
+  const [transport, setTransport] = useState<"ws" | "http" | "local">("local");
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Initial load
+  // Initial load + transport detection
   useEffect(() => {
     let cancelled = false;
     fetchMessages(myName, friendName).then((m) => {
       if (!cancelled) {
         setMessages(m);
-        setHealthy(isApiHealthy());
+        setTransport(isWsConnected(myName) ? "ws" : isApiHealthy() ? "http" : "local");
       }
     });
     return () => {
@@ -254,16 +254,28 @@ function Thread({
     };
   }, [myName, friendName]);
 
-  // Poll for new messages every 2s (covers cross-device via API)
+  // WebSocket push subscription — instant updates when peer sends
+  useEffect(() => {
+    const unsub = subscribeToThread(myName, friendName, (msg) => {
+      setMessages((prev) => {
+        // Avoid duplicates (echo + history might overlap)
+        if (prev.some((m) => m.ts === msg.ts && m.from === msg.from && m.text === msg.text)) return prev;
+        return [...prev, msg];
+      });
+    });
+    return unsub;
+  }, [myName, friendName]);
+
+  // Poll fallback every 3s (only effective if WS isn't pushing)
   useEffect(() => {
     let cancelled = false;
     const interval = setInterval(async () => {
       const m = await fetchMessages(myName, friendName);
       if (!cancelled) {
         setMessages(m);
-        setHealthy(isApiHealthy());
+        setTransport(isWsConnected(myName) ? "ws" : isApiHealthy() ? "http" : "local");
       }
-    }, 2000);
+    }, 3000);
     return () => {
       cancelled = true;
       clearInterval(interval);
@@ -281,7 +293,7 @@ function Thread({
       // Optimistic — refresh from server so we see anything new from peer too
       const fresh = await fetchMessages(myName, friendName);
       setMessages(fresh);
-      setHealthy(isApiHealthy());
+      setTransport(isWsConnected(myName) ? "ws" : isApiHealthy() ? "http" : "local");
       setText("");
     }
   };
@@ -299,10 +311,21 @@ function Thread({
         </button>
         <span
           className={`text-[10px] uppercase tracking-widest ${
-            healthy ? "text-emerald-600" : "text-amber-700"
+            transport === "ws"
+              ? "text-emerald-600"
+              : transport === "http"
+                ? "text-sky-600"
+                : "text-amber-700"
           }`}
+          title={
+            transport === "ws"
+              ? "WebSocket — real-time"
+              : transport === "http"
+                ? "HTTP — polling 3s"
+                : "Local — only this browser"
+          }
         >
-          {healthy ? "● online" : "● offline (lokalne)"}
+          {transport === "ws" ? "● live" : transport === "http" ? "● online" : "● offline"}
         </span>
       </div>
 

@@ -1,0 +1,22 @@
+{
+  "name": "zolwie-ws",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "WebSocket chat server for Żarłoczne Żółwie",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/ws-server.js",
+    "dev": "tsc --watch & node --watch dist/ws-server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/pg": "^8.11.10",
+    "@types/ws": "^8.5.13",
+    "typescript": "^5.7.2"
+  }
+}

@@ -1,8 +1,9 @@
-// Cross-device chat: API-first with localStorage fallback.
-// Falls back transparently if the API is unreachable (offline, DATABASE_URL missing, etc.).
+// Cross-device chat: WebSocket primary → HTTP API fallback → localStorage fallback.
+// Order of preference (latency-wise): WS < HTTP polling < localStorage.
 
 import type { Message } from "./friends";
 import { getMessages as lsGetMessages, sendMessage as lsSendMessage } from "./friends";
+import { getChatSocket, type ChatSocket } from "./chat-ws";
 
 const API_URL = "/api/chat/messages";
 
@@ -11,6 +12,17 @@ let apiHealthy = true; // optimistic — flip to false on first error, recover o
 /** Fetch all messages between current user and `friendName`. */
 export async function fetchMessages(myName: string, friendName: string): Promise<Message[]> {
   if (typeof window === "undefined") return [];
+  // Try WebSocket first
+  const ws = getChatSocket(myName);
+  if (ws.isOpen()) {
+    try {
+      const messages = await ws.requestHistory(friendName);
+      mirrorToLocalStorage(myName, friendName, messages);
+      return messages;
+    } catch {
+      // fall through to HTTP
+    }
+  }
   if (!apiHealthy) return lsGetMessages(myName, friendName);
   try {
     const res = await fetch(
@@ -20,11 +32,7 @@ export async function fetchMessages(myName: string, friendName: string): Promise
     if (!res.ok) throw new Error(`API ${res.status}`);
     const json = (await res.json()) as { messages: Message[] };
     apiHealthy = true;
-    // Cache mirror in localStorage so the user can reread offline
-    try {
-      const key = "zolwie:msg:" + [myName.toLowerCase(), friendName.toLowerCase()].sort().join("|");
-      localStorage.setItem(key, JSON.stringify(json.messages.slice(-200)));
-    } catch {}
+    mirrorToLocalStorage(myName, friendName, json.messages);
     return json.messages;
   } catch {
     apiHealthy = false;
@@ -41,6 +49,12 @@ export async function postMessage(
   if (typeof window === "undefined") return null;
   const trimmed = text.trim();
   if (!trimmed) return null;
+  // Prefer WebSocket
+  const ws = getChatSocket(myName);
+  if (ws.isOpen()) {
+    const sent = await ws.sendMessage(friendName, trimmed).catch(() => null);
+    if (sent) return sent;
+  }
   if (!apiHealthy) {
     return lsSendMessage(friendName, trimmed);
   }
@@ -60,6 +74,31 @@ export async function postMessage(
   }
 }
 
+function mirrorToLocalStorage(myName: string, friendName: string, messages: Message[]) {
+  try {
+    const key = "zolwie:msg:" + [myName.toLowerCase(), friendName.toLowerCase()].sort().join("|");
+    localStorage.setItem(key, JSON.stringify(messages.slice(-200)));
+  } catch {}
+}
+
 export function isApiHealthy() {
   return apiHealthy;
 }
+
+/** Subscribe to incoming messages from `friendName` (WS push). Returns unsubscribe. */
+export function subscribeToThread(
+  myName: string,
+  friendName: string,
+  callback: (msg: Message) => void,
+): () => void {
+  if (typeof window === "undefined") return () => {};
+  const ws = getChatSocket(myName);
+  return ws.subscribe(friendName, callback);
+}
+
+export function isWsConnected(myName: string): boolean {
+  if (typeof window === "undefined") return false;
+  return getChatSocket(myName).isOpen();
+}
+
+export type { ChatSocket };

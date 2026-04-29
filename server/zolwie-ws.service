@@ -1,0 +1,18 @@
+[Unit]
+Description=Zarloczne Zolwie WebSocket Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/zolwie/server
+EnvironmentFile=/opt/zolwie/server/.env
+ExecStart=/usr/bin/node /opt/zolwie/server/dist/ws-server.js
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=zolwie-ws
+
+[Install]
+WantedBy=multi-user.target

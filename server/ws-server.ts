@@ -1,0 +1,194 @@
+// Żarłoczne Żółwie — WebSocket chat server
+// Listens on 127.0.0.1:PORT, fronted by nginx (TLS termination + WSS upgrade).
+// Persists every message to Neon Postgres (`chat_messages` table — same as the
+// Vercel API route, so HTTP polling and WS clients see the same history).
+
+import { WebSocketServer, WebSocket } from "ws";
+import { createServer, type IncomingMessage } from "http";
+import pg from "pg";
+
+const PORT = parseInt(process.env.PORT ?? "3001", 10);
+const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL) {
+  console.error("FATAL: DATABASE_URL env var is required");
+  process.exit(1);
+}
+
+const pool = new pg.Pool({
+  connectionString: DATABASE_URL,
+  max: 10,
+  ssl: DATABASE_URL.includes("sslmode=require") ? { rejectUnauthorized: false } : undefined,
+});
+
+// Bootstrap the table — idempotent
+async function ensureTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS chat_messages (
+      id SERIAL PRIMARY KEY,
+      from_name TEXT NOT NULL,
+      to_name TEXT NOT NULL,
+      text TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS chat_pair_idx ON chat_messages (from_name, to_name);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS chat_pair_reverse_idx ON chat_messages (to_name, from_name);`);
+}
+
+// Wire-format messages
+type ClientMsg =
+  | { type: "auth"; name: string }
+  | { type: "history"; with: string }
+  | { type: "send"; to: string; text: string }
+  | { type: "ping" };
+type ServerMsg =
+  | { type: "ready"; name: string }
+  | { type: "history"; with: string; messages: WireMessage[] }
+  | { type: "msg"; from: string; to: string; text: string; ts: number }
+  | { type: "error"; reason: string }
+  | { type: "pong" };
+type WireMessage = { from: string; text: string; ts: number };
+
+// userNameLower → set of active WebSockets for that user
+const connections = new Map<string, Set<WebSocket>>();
+
+const httpServer = createServer((req, res) => {
+  // Tiny health endpoint for monitoring/uptime checks
+  if (req.url === "/health") {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ ok: true, connections: connections.size }));
+    return;
+  }
+  res.writeHead(404);
+  res.end("Use WebSocket");
+});
+
+const wss = new WebSocketServer({ server: httpServer });
+
+wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
+  const ip = req.socket.remoteAddress ?? "?";
+  let myNameLower: string | null = null;
+  let myName: string | null = null;
+
+  const send = (m: ServerMsg) => {
+    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(m));
+  };
+  const fail = (reason: string) => send({ type: "error", reason });
+
+  ws.on("message", async (raw) => {
+    let msg: ClientMsg;
+    try {
+      msg = JSON.parse(raw.toString());
+    } catch {
+      return fail("bad_json");
+    }
+
+    if (msg.type === "ping") return send({ type: "pong" });
+
+    if (msg.type === "auth") {
+      const name = msg.name?.trim();
+      if (!name || name.length > 50) return fail("bad_name");
+      myName = name;
+      myNameLower = name.toLowerCase();
+      if (!connections.has(myNameLower)) connections.set(myNameLower, new Set());
+      connections.get(myNameLower)!.add(ws);
+      send({ type: "ready", name });
+      return;
+    }
+
+    if (!myNameLower) return fail("not_authed");
+
+    if (msg.type === "history") {
+      const peer = msg.with?.trim();
+      if (!peer) return fail("bad_peer");
+      try {
+        const r = await pool.query<{ from_name: string; text: string; created_at: Date }>(
+          `SELECT from_name, text, created_at
+             FROM chat_messages
+             WHERE (lower(from_name) = $1 AND lower(to_name) = $2)
+                OR (lower(from_name) = $2 AND lower(to_name) = $1)
+             ORDER BY created_at ASC
+             LIMIT 200`,
+          [myNameLower, peer.toLowerCase()],
+        );
+        const messages: WireMessage[] = r.rows.map((row) => ({
+          from: row.from_name,
+          text: row.text,
+          ts: new Date(row.created_at).getTime(),
+        }));
+        send({ type: "history", with: peer, messages });
+      } catch (e) {
+        console.error("history error", e);
+        fail("db_error");
+      }
+      return;
+    }
+
+    if (msg.type === "send") {
+      const to = msg.to?.trim();
+      const text = msg.text?.trim().slice(0, 500);
+      if (!to || !text) return fail("bad_payload");
+      if (to.toLowerCase() === myNameLower) return fail("self");
+      try {
+        const r = await pool.query<{ created_at: Date }>(
+          `INSERT INTO chat_messages (from_name, to_name, text)
+             VALUES ($1, $2, $3)
+             RETURNING created_at`,
+          [myName, to, text],
+        );
+        const ts = new Date(r.rows[0].created_at).getTime();
+        const broadcast: ServerMsg = { type: "msg", from: myName!, to, text, ts };
+        // Echo to sender (all their open tabs)
+        const senderSet = connections.get(myNameLower);
+        if (senderSet) for (const c of senderSet) c.readyState === WebSocket.OPEN && c.send(JSON.stringify(broadcast));
+        // Push to recipient if connected
+        const recipSet = connections.get(to.toLowerCase());
+        if (recipSet) for (const c of recipSet) c.readyState === WebSocket.OPEN && c.send(JSON.stringify(broadcast));
+      } catch (e) {
+        console.error("send error", e);
+        fail("db_error");
+      }
+      return;
+    }
+
+    fail("unknown_type");
+  });
+
+  ws.on("close", () => {
+    if (myNameLower) {
+      const set = connections.get(myNameLower);
+      set?.delete(ws);
+      if (set && set.size === 0) connections.delete(myNameLower);
+    }
+    console.log(`[ws] disconnect ip=${ip} name=${myName ?? "?"}`);
+  });
+
+  ws.on("error", (e) => {
+    console.error(`[ws] error ip=${ip} name=${myName ?? "?"}`, e);
+  });
+
+  console.log(`[ws] connect ip=${ip}`);
+});
+
+// Boot
+ensureTable()
+  .then(() => {
+    httpServer.listen(PORT, "127.0.0.1", () => {
+      console.log(`Żarłoczne Żółwie WS listening on 127.0.0.1:${PORT}`);
+    });
+  })
+  .catch((e) => {
+    console.error("FATAL: ensureTable failed", e);
+    process.exit(1);
+  });
+
+// Graceful shutdown
+function shutdown() {
+  console.log("shutting down...");
+  wss.clients.forEach((c) => c.close(1001, "server shutdown"));
+  httpServer.close();
+  pool.end();
+  setTimeout(() => process.exit(0), 1000);
+}
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
