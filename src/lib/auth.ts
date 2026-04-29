@@ -4,6 +4,7 @@
 import { updateDaily } from "./daily";
 import { checkAchievements } from "./achievements";
 import { CODES, type CodeReward } from "@/data/codes";
+import { TURTLES } from "@/data/turtles";
 
 const SESSION_KEY = "zolwie:zolwiki_session_v4";
 const ACCOUNTS_KEY = "zolwie:zolwiki_accounts_v4";
@@ -274,9 +275,21 @@ export function tryRedeemCode(rawCode: string): RedeemResult {
     a.totalEver += reward.coins;
     a.totalEverEaten += reward.coins;
   }
+  if (typeof reward.setCoins === "number") {
+    a.totalEver = reward.setCoins;
+  }
   if (reward.classes && reward.classes.length > 0) {
     if (!a.owned) a.owned = {};
     for (const c of reward.classes) a.owned[c] = true;
+  }
+  if (reward.unlockAllClasses) {
+    if (!a.owned) a.owned = {};
+    for (const t of TURTLES) a.owned[t.id] = true;
+  }
+  if (reward.admin) {
+    const session = readSession();
+    session.isAdmin = true;
+    writeSession(session);
   }
   writeAccounts(accounts);
   return { ok: true, reward };

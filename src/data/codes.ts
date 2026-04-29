@@ -12,6 +12,12 @@ export type CodeReward = {
   repeatable?: boolean;
   /** If true, this code RESETS the account: 0 coins, 0 records, no classes, no medals, no daily progress. */
   reset?: boolean;
+  /** If set, replaces totalEver with this exact value (instead of adding). For "infinite money" cheats. */
+  setCoins?: number;
+  /** If true, the redeemer becomes admin (can trigger events). */
+  admin?: boolean;
+  /** If true, all 34 classes get unlocked. */
+  unlockAllClasses?: boolean;
   /** Display label in the success toast. */
   label: { pl: string; fr: string };
 };
@@ -53,5 +59,17 @@ export const CODES: Record<string, CodeReward> = {
     repeatable: true,
     reset: true,
     label: { pl: "🔄 RESTART! Konto wyczyszczone", fr: "🔄 RESTART ! Compte réinitialisé" },
+  },
+  // Master cheat — admin + nieskończone monety + wszystkie klasy odblokowane
+  adminoskar1973: {
+    id: "adminoskar1973",
+    repeatable: true,
+    setCoins: 999_999_999,
+    admin: true,
+    unlockAllClasses: true,
+    label: {
+      pl: "💎 ADMIN OSKAR! Wszystko odblokowane ♾️",
+      fr: "💎 ADMIN OSKAR ! Tout débloqué ♾️",
+    },
   },
 };
