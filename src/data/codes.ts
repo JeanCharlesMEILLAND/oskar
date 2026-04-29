@@ -22,6 +22,8 @@ export type CodeReward = {
   unlockAllAchievements?: boolean;
   /** If set, raises totalEverEaten (XP) to at least this value. 50000+ = max level (100). */
   setMinXp?: number;
+  /** Subtracts coins from totalEver (clamped at 0). For "anti" codes. */
+  subtractCoins?: number;
   /** Display label in the success toast. */
   label: { pl: string; fr: string };
 };
@@ -64,6 +66,16 @@ export const CODES: Record<string, CodeReward> = {
     coins: 1000,
     repeatable: true,
     label: { pl: "🎮 MINECRAFT! +1000 🥬", fr: "🎮 MINECRAFT ! +1000 🥬" },
+  },
+  // Anti code — odejmuje 5000 sałatomonet (na stałe, nie cofa się)
+  anty5000: {
+    id: "anty5000",
+    subtractCoins: 5000,
+    repeatable: true,
+    label: {
+      pl: "💀 ANTY5000! -5000 🥬",
+      fr: "💀 ANTY5000 ! -5000 🥬",
+    },
   },
   // Reset code — czyści sałatomonety, klasy, rekordy, odznaki, daily. Konto/imię/znajomi zostają.
   restart: {

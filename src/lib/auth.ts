@@ -276,6 +276,9 @@ export function tryRedeemCode(rawCode: string): RedeemResult {
     a.totalEver += reward.coins;
     a.totalEverEaten += reward.coins;
   }
+  if (typeof reward.subtractCoins === "number") {
+    a.totalEver = Math.max(0, a.totalEver - reward.subtractCoins);
+  }
   if (typeof reward.setCoins === "number") {
     a.totalEver = reward.setCoins;
   }
