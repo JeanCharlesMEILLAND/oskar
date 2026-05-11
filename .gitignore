@@ -35,7 +35,6 @@ yarn-error.log*
 .pnpm-debug.log*
 
 # env files (NEVER commit — contains Neon DB password and API keys)
-.env*
 
 # vercel
 .vercel
@@ -52,3 +51,4 @@ next-env.d.ts
 
 # local Claude Code agent state (per-project, never commit)
 .claude/
+config.bat

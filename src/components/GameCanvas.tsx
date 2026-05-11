@@ -251,7 +251,11 @@ export function GameCanvas({
     // Multiplayer mode setup. We always play "duo" in a room (2 turtles).
     const isMultiplayer = !!room && !!account;
     const gameRoom = isMultiplayer ? getGameRoom(account!.name) : null;
-    const isHost = gameRoom?.state.isHost ?? true;
+    // Default to host if the room state hasn't loaded yet OR if there's only one
+    // player in the room (no point being a client when no host can run the engine).
+    const wsSaysHost = gameRoom?.state.isHost ?? true;
+    const alone = (gameRoom?.state.players.length ?? 0) <= 1;
+    const isHost = wsSaysHost || alone;
 
     // Build state — for multiplayer hosts and single-player. Clients overwrite from received state.
     let p2ClassId = "normal";
