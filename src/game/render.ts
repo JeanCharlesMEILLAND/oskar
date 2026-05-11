@@ -465,6 +465,19 @@ function drawTurtle(ctx: CanvasRenderingContext2D, t: Turtle, tick: number) {
 
   const r = TURTLE_RADIUS;
 
+  // Rainbow class — cycle hues every tick so the shell visibly shimmers in-game.
+  const isRainbow = t.classId === "rainbow";
+  const rainbowHue = (tick * 2) % 360;
+  const shellCol = isRainbow ? `hsl(${rainbowHue}, 85%, 55%)` : t.color.shell;
+  const bodyCol = isRainbow ? `hsl(${(rainbowHue + 60) % 360}, 80%, 65%)` : t.color.body;
+  const accentCol = isRainbow ? `hsl(${(rainbowHue + 180) % 360}, 90%, 60%)` : t.color.accent;
+
+  // Skoczek (bouncy) — gentle constant up-down bob so it visibly "jumps" while idle.
+  if (t.classId === "bouncy") {
+    const bob = Math.sin(tick * 0.25) * 3;
+    ctx.translate(0, -Math.abs(bob));
+  }
+
   // Invuln blink
   const invulnTicks = t.invulnUntil - tick;
   if (invulnTicks > 0 && Math.floor(tick / 4) % 2 === 0) {
@@ -478,7 +491,7 @@ function drawTurtle(ctx: CanvasRenderingContext2D, t: Turtle, tick: number) {
   ctx.fill();
 
   // Legs (4 corners)
-  ctx.fillStyle = t.color.body;
+  ctx.fillStyle = bodyCol;
   const legPositions: Array<[number, number]> = [
     [-r * 0.85, -r * 0.55],
     [r * 0.85, -r * 0.55],
@@ -496,7 +509,7 @@ function drawTurtle(ctx: CanvasRenderingContext2D, t: Turtle, tick: number) {
   }
 
   // Tail (back, opposite of facing)
-  ctx.fillStyle = t.color.accent;
+  ctx.fillStyle = accentCol;
   ctx.beginPath();
   ctx.moveTo(-3, r * 0.85);
   ctx.lineTo(0, r * 1.1);
@@ -506,23 +519,23 @@ function drawTurtle(ctx: CanvasRenderingContext2D, t: Turtle, tick: number) {
 
   // Shell base
   const shellGrad = ctx.createRadialGradient(-r * 0.2, -r * 0.3, 2, 0, 0, r);
-  shellGrad.addColorStop(0, lighten(t.color.shell, 30));
-  shellGrad.addColorStop(0.65, t.color.shell);
-  shellGrad.addColorStop(1, darken(t.color.shell, 25));
+  shellGrad.addColorStop(0, lighten(shellCol, 30));
+  shellGrad.addColorStop(0.65, shellCol);
+  shellGrad.addColorStop(1, darken(shellCol, 25));
   ctx.fillStyle = shellGrad;
   ctx.beginPath();
   ctx.arc(0, 0, r, 0, Math.PI * 2);
   ctx.fill();
 
   // Shell rim
-  ctx.strokeStyle = darken(t.color.shell, 35);
+  ctx.strokeStyle = darken(shellCol, 35);
   ctx.lineWidth = 1.5;
   ctx.globalAlpha *= 0.7;
   ctx.stroke();
   ctx.globalAlpha = invulnTicks > 0 && Math.floor(tick / 4) % 2 === 0 ? 0.45 : 1;
 
   // Hex scutes (top-down)
-  ctx.strokeStyle = t.color.accent;
+  ctx.strokeStyle = accentCol;
   ctx.lineWidth = 1;
   ctx.globalAlpha *= 0.7;
   drawHex(ctx, 0, 0, r * 0.45);
@@ -533,7 +546,7 @@ function drawTurtle(ctx: CanvasRenderingContext2D, t: Turtle, tick: number) {
   ctx.globalAlpha = invulnTicks > 0 && Math.floor(tick / 4) % 2 === 0 ? 0.45 : 1;
 
   // Head (forward = up since we rotated)
-  ctx.fillStyle = t.color.body;
+  ctx.fillStyle = bodyCol;
   ctx.beginPath();
   ctx.ellipse(0, -r * 0.95, r * 0.45, r * 0.42, 0, 0, Math.PI * 2);
   ctx.fill();
