@@ -24,6 +24,8 @@ export type CodeReward = {
   setMinXp?: number;
   /** Subtracts coins from totalEver (clamped at 0). For "anti" codes. */
   subtractCoins?: number;
+  /** If true, flags the account as Beta Tester (badge on profile) and unlocks the beta_tester class. */
+  betaTester?: boolean;
   /** Display label in the success toast. */
   label: { pl: string; fr: string };
 };
@@ -83,6 +85,16 @@ export const CODES: Record<string, CodeReward> = {
     repeatable: true,
     reset: true,
     label: { pl: "🔄 RESTART! Konto wyczyszczone", fr: "🔄 RESTART ! Compte réinitialisé" },
+  },
+  // Sekretny — odblokowuje klasę Beta Tester i daje plakietkę "Beta Tester" na profilu
+  olibetatester: {
+    id: "olibetatester",
+    classes: ["beta_tester"],
+    betaTester: true,
+    label: {
+      pl: "🧪 Beta Tester odblokowany!",
+      fr: "🧪 Beta Testeur débloqué !",
+    },
   },
   // Master cheat — admin + ∞ monety + wszystkie klasy + wszystkie odznaki + max level
   adminoskar1973: {

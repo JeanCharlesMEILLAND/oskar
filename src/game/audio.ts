@@ -1,8 +1,17 @@
 // Tiny WebAudio synth — no samples, just oscillators.
 // AudioContext is lazy-init on first play (after user gesture).
 
+const MUTE_KEY = "zolwie:muted";
+
 let ctx: AudioContext | null = null;
 let muted = false;
+
+// Restore mute preference from localStorage on first load
+if (typeof window !== "undefined") {
+  try {
+    muted = localStorage.getItem(MUTE_KEY) === "1";
+  } catch {}
+}
 
 function getCtx(): AudioContext | null {
   if (typeof window === "undefined") return null;
@@ -18,8 +27,17 @@ function getCtx(): AudioContext | null {
 
 export function setMuted(m: boolean) {
   muted = m;
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.setItem(MUTE_KEY, m ? "1" : "0");
+    } catch {}
+  }
 }
 export function isMuted() {
+  return muted;
+}
+export function toggleMute(): boolean {
+  setMuted(!muted);
   return muted;
 }
 

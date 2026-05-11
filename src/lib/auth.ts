@@ -29,6 +29,7 @@ export type Account = {
   friends: string[];
   friendRequests: string[];
   redeemed?: Record<string, true>;
+  isBetaTester?: boolean;
 };
 
 export type Session = {
@@ -301,6 +302,11 @@ export function tryRedeemCode(rawCode: string): RedeemResult {
     const session = readSession();
     session.isAdmin = true;
     writeSession(session);
+  }
+  if (reward.betaTester) {
+    a.isBetaTester = true;
+    if (!a.owned) a.owned = {};
+    a.owned.beta_tester = true;
   }
   writeAccounts(accounts);
   return { ok: true, reward };

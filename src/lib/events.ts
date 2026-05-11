@@ -4,7 +4,7 @@
 const EVENT_KEY = "zolwie:zolwiki_event_v4";
 const EVENT_DURATION_MS = 5 * 60 * 1000; // 5 minutes
 
-export type EventType = "double" | "rain";
+export type EventType = "double" | "rain" | "halloween" | "christmas";
 export type EventState = {
   active: boolean;
   type: EventType | null;

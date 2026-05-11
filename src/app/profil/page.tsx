@@ -50,7 +50,7 @@ export default function ProfilePage() {
   const xpInfo = levelFromXp(account.totalEverEaten ?? 0);
   const xpPct = Math.min(100, (xpInfo.currentXp / xpInfo.neededXp) * 100);
   const selectedClass = TURTLES_BY_ID[account.selectedClass] ?? TURTLES_BY_ID.normal;
-  const ownedCount = Object.keys(account.owned).length;
+  const ownedCount = Object.keys(account.owned).filter((id) => id !== "beta_tester").length;
   const achCount = Object.keys(account.ach ?? {}).length;
   const totalCoinsEverEarned = account.totalEverEaten + achCount * ACH_REWARD; // approx
 
@@ -97,6 +97,11 @@ export default function ProfilePage() {
                 {admin && (
                   <span className="ml-2 inline-block bg-amber-200 text-amber-900 px-2 py-0.5 rounded-full text-[10px]">
                     🔑 ADMIN
+                  </span>
+                )}
+                {account.isBetaTester && (
+                  <span className="ml-2 inline-block bg-gradient-to-r from-violet-300 to-fuchsia-300 text-violet-950 px-2 py-0.5 rounded-full text-[10px] font-semibold">
+                    🧪 BETA TESTER
                   </span>
                 )}
               </p>

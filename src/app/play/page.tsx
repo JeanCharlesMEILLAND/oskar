@@ -8,6 +8,8 @@ import { FallingSalads } from "@/components/FallingSalads";
 import { LanguageSwitch } from "@/components/LanguageSwitch";
 import { TurtleIcon } from "@/components/TurtleIcon";
 import { Turtle } from "@/components/Turtle";
+import { MuteButton } from "@/components/MuteButton";
+import { InstallPWAButton } from "@/components/InstallPWAButton";
 import {
   ModeIconSolo,
   ModeIconDuo,
@@ -32,7 +34,7 @@ import {
   stopEvent,
   type EventState,
 } from "@/lib/events";
-import { getGameRoom, type RoomState } from "@/lib/game-ws";
+import { getGameRoom, type GamePayload, type RoomState } from "@/lib/game-ws";
 
 const TOTAL_CLASSES = 34;
 const TOTAL_MEDALS = 16;
@@ -73,7 +75,8 @@ export default function LobbyPage() {
     );
   }
 
-  const ownedCount = Object.keys(account.owned).length;
+  // Exclude secret classes (e.g. beta_tester) from the completion count.
+  const ownedCount = Object.keys(account.owned).filter((id) => id !== "beta_tester").length;
   const medalsCount = Object.keys(account.ach).length;
   const selectedClass = TURTLES_BY_ID[account.selectedClass] ?? TURTLES_BY_ID.normal;
 
@@ -101,6 +104,8 @@ export default function LobbyPage() {
         </Link>
         <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
           <LanguageSwitch />
+          <InstallPWAButton />
+          <MuteButton />
           <button
             onClick={() => setShowCode(true)}
             className="inline-flex items-center gap-1 rounded-full border border-pink-200 bg-pink-50/70 px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium text-pink-900 backdrop-blur hover:bg-pink-50 transition whitespace-nowrap"
@@ -162,17 +167,33 @@ export default function LobbyPage() {
         {/* Active event banner */}
         {event.active && (
           <div className="mb-6 rounded-3xl bg-gradient-to-r from-pink-100 via-amber-100 to-yellow-100 border-2 border-pink-300 p-4 sm:p-5 flex items-center gap-3 sm:gap-4 shadow-lg animate-pulse-slow">
-            <div className="text-3xl sm:text-4xl shrink-0">{event.type === "double" ? "✨" : "🌧️"}</div>
+            <div className="text-3xl sm:text-4xl shrink-0">
+              {event.type === "double"
+                ? "✨"
+                : event.type === "rain"
+                  ? "🌧️"
+                  : event.type === "halloween"
+                    ? "🎃"
+                    : "🎄"}
+            </div>
             <div className="flex-1 min-w-0">
               <p className="font-[var(--font-fraunces)] text-lg sm:text-xl font-semibold text-emerald-950">
                 {event.type === "double"
-                  ? lang === "pl" ? "EVENT 2× ✨" : "ÉVÉNEMENT 2× ✨"
-                  : lang === "pl" ? "DESZCZ SAŁAT 🌧️" : "PLUIE DE SALADES 🌧️"}
+                  ? "EVENT 2× ✨"
+                  : event.type === "rain"
+                    ? lang === "pl" ? "DESZCZ SAŁAT 🌧️" : "PLUIE 🌧️"
+                    : event.type === "halloween"
+                      ? "HALLOWEEN 🎃 ×3"
+                      : lang === "pl" ? "ŚWIĘTA 🎄 ×3" : "NOËL 🎄 ×3"}
               </p>
               <p className="text-xs sm:text-sm text-emerald-900/70">
                 {event.type === "double"
-                  ? lang === "pl" ? "Punkty ×2 + złote sałaty częściej" : "Points ×2 + plus de salades dorées"
-                  : lang === "pl" ? "Więcej sałat na mapie!" : "Plus de salades sur la carte !"}
+                  ? lang === "pl" ? "Punkty ×2 + złote sałaty 10%" : "Points ×2 + dorées 10%"
+                  : event.type === "rain"
+                    ? lang === "pl" ? "Więcej sałat na mapie!" : "Plus de salades !"
+                    : event.type === "halloween"
+                      ? lang === "pl" ? "Punkty ×3 + złote 20%" : "Points ×3 + dorées 20%"
+                      : lang === "pl" ? "Punkty ×3 + złote 30% + dużo sałat" : "Points ×3 + dorées 30% + tonnes de salades"}
                 {" · "}<span className="font-mono">{eventTimeRemainingSec(event)}s</span>
               </p>
             </div>
@@ -421,6 +442,18 @@ function MultiplayerModal({
     return r.onRoomChange(setRoom);
   }, [myName]);
 
+  // Guest auto-start: when host starts and broadcasts "start",
+  // navigate guest to the same room game route.
+  useEffect(() => {
+    if (!room.code || room.isHost) return;
+    const r = getGameRoom(myName);
+    return r.onMessage((m: { from: string; payload: GamePayload }) => {
+      if (m.payload.kind === "start") {
+        onStart(room.code);
+      }
+    });
+  }, [myName, onStart, room.code, room.isHost]);
+
   const handleCreate = async () => {
     setBusy(true);
     setErr(null);
@@ -528,7 +561,26 @@ function MultiplayerModal({
             {room.isHost ? (
               <button
                 type="button"
-                onClick={() => onStart(room.code!)}
+                onClick={() => {
+                  // Tell guests to navigate to the game NOW. The real seed will be
+                  // re-broadcast by GameCanvas once it mounts; this one only triggers nav.
+                  const code = room.code!;
+                  getGameRoom(myName).broadcast({
+                    kind: "start",
+                    seed: 0,
+                    mode: "duo",
+                  });
+                  // Tiny delay so the WS send buffer flushes before navigation tears down
+                  // the React tree. Then re-broadcast once more after nav as a safety net.
+                  setTimeout(() => {
+                    getGameRoom(myName).broadcast({
+                      kind: "start",
+                      seed: 0,
+                      mode: "duo",
+                    });
+                    onStart(code);
+                  }, 80);
+                }}
                 disabled={room.players.length < 2}
                 className="rounded-full bg-emerald-700 text-white px-5 py-3 font-medium hover:bg-emerald-800 disabled:opacity-40 disabled:cursor-not-allowed transition"
               >

@@ -1,11 +1,93 @@
-// Friends + messages — localStorage-only for now (single-browser).
-// When the WebSocket server (VPS) is online, swap these for API calls.
+// Friends + messages.
+// Friend graph (requests, list) lives in Neon via /api/friends — cross-device.
+// Messages still live in localStorage for now (chat already has its own WS path).
 
 import type { Account } from "./auth";
 
 const SESSION_KEY = "zolwie:zolwiki_session_v4";
 const ACCOUNTS_KEY = "zolwie:zolwiki_accounts_v4";
 const MSG_KEY_PREFIX = "zolwie:msg:";
+
+// =============== HTTP-backed friend graph (cross-device) ===============
+
+export type ServerFriendOpResult =
+  | { ok: true; mutual?: boolean }
+  | { ok: false; reason: "self" | "alreadyFriend" | "noSession" | "empty" | "network" };
+
+async function postFriendsApi(body: Record<string, string>): Promise<Response> {
+  return fetch("/api/friends", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function fetchFriendGraph(me: string): Promise<{ friends: string[]; requests: string[] } | null> {
+  try {
+    const r = await fetch(`/api/friends?me=${encodeURIComponent(me)}`);
+    if (!r.ok) return null;
+    const data = (await r.json()) as { friends?: string[]; requests?: string[] };
+    return { friends: data.friends ?? [], requests: data.requests ?? [] };
+  } catch {
+    return null;
+  }
+}
+
+export async function sendFriendRequestApi(targetName: string): Promise<ServerFriendOpResult> {
+  if (typeof window === "undefined") return { ok: false, reason: "noSession" };
+  const myName = readSessionName();
+  if (!myName) return { ok: false, reason: "noSession" };
+  const trimmed = targetName.trim();
+  if (!trimmed) return { ok: false, reason: "empty" };
+  if (trimmed.toLowerCase() === myName.toLowerCase()) return { ok: false, reason: "self" };
+  try {
+    const r = await postFriendsApi({ action: "request", from: myName, to: trimmed });
+    if (!r.ok) {
+      const j = (await r.json().catch(() => null)) as { error?: string } | null;
+      const err = j?.error;
+      if (err === "self") return { ok: false, reason: "self" };
+      if (err === "alreadyFriend") return { ok: false, reason: "alreadyFriend" };
+      return { ok: false, reason: "network" };
+    }
+    const j = (await r.json()) as { ok: boolean; mutual?: boolean };
+    return { ok: true, mutual: !!j.mutual };
+  } catch {
+    return { ok: false, reason: "network" };
+  }
+}
+
+export async function acceptFriendRequestApi(fromName: string): Promise<boolean> {
+  const me = readSessionName();
+  if (!me) return false;
+  try {
+    const r = await postFriendsApi({ action: "accept", me, from: fromName });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function declineFriendRequestApi(fromName: string): Promise<boolean> {
+  const me = readSessionName();
+  if (!me) return false;
+  try {
+    const r = await postFriendsApi({ action: "decline", me, from: fromName });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function removeFriendApi(friendName: string): Promise<boolean> {
+  const me = readSessionName();
+  if (!me) return false;
+  try {
+    const r = await postFriendsApi({ action: "remove", me, friend: friendName });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
 
 export type Message = { from: string; text: string; ts: number };
 

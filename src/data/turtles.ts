@@ -12,6 +12,8 @@ export type TurtleStats = {
   freezeRocks?: boolean; // rocks never damage
   rainbow?: boolean; // visual flag
   bounce?: boolean; // bounce off rocks instead of damage
+  bonusChance?: number; // 0..1 probability that a lettuce eat uses bonusPoints instead of points
+  bonusPoints?: number; // points multiplier applied when the chance hits
 };
 
 export type TurtleClass = {
@@ -65,6 +67,8 @@ export const CLASS_STATS: Record<string, TurtleStats> = {
   svip_limited: { speed: 2, points: 3, lives: 4, magnet: 100, dodge: 0.5, bonusTime: 20 },
   gvip_limited: { speed: 2, points: 4, lives: 5, magnet: 120, dodge: 0.6, bonusTime: 30 },
   zolwiomly_bogacz: { speed: 2, points: 5, lives: 7, magnet: 150, dodge: 0.7, bonusTime: 60 },
+  // Secret class — unlocked only via the OLIBETATESTER code.
+  beta_tester: { speed: 1.4, points: 10, lives: 3, magnet: 80, bonusChance: 0.2, bonusPoints: 25 },
 };
 
 export function getClassStats(id: string): TurtleStats {
@@ -618,6 +622,26 @@ export const TURTLES: TurtleClass[] = [
       accent: "#fde047",
       pattern: "crystals",
       accessory: "diamond",
+      aura: "rainbow",
+      expression: "sparkle",
+    },
+  },
+  // Secret — only redeemable via OLIBETATESTER code. Hidden from the regular shop list.
+  {
+    id: "beta_tester",
+    rarity: "limited",
+    emoji: "🧪",
+    price: 99999,
+    names: { pl: "Beta Tester 🧪", fr: "Beta Testeur 🧪" },
+    descs: {
+      pl: "Sekretna! Sałata 10pkt, 1/5 szans na 25!",
+      fr: "Secrète ! Salade 10pts, 1/5 chance d'en faire 25 !",
+    },
+    visual: {
+      body: "#a78bfa",
+      shell: "#7c3aed",
+      accent: "#fde047",
+      pattern: "stripes",
       aura: "rainbow",
       expression: "sparkle",
     },

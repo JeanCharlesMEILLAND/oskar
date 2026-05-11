@@ -8,25 +8,35 @@ import { SFX } from "@/game/audio";
 import { getCurrentAccount, saveGameResult, type GameResult } from "@/lib/auth";
 import { getGameRoom, type GamePayload } from "@/lib/game-ws";
 
-type DirKey = "up" | "down" | "left" | "right";
+type Vec = { dx: -1 | 0 | 1; dy: -1 | 0 | 1 };
+// Raw delta — keys add up, then we clamp to -1..1 per axis.
+type Delta = { dx: -1 | 0 | 1; dy: -1 | 0 | 1 };
 
-const P1_KEYS_ARROWS: Record<string, DirKey> = {
-  arrowup: "up",
-  arrowdown: "down",
-  arrowleft: "left",
-  arrowright: "right",
+// 8-way single-key map using the QWE/ASD/ZXC keypad layout.
+// Q = up-left, W = up, E = up-right
+// A = left,             D = right
+// Z = down-left, S/X = down, C = down-right
+const P1_KEYS_ARROWS: Record<string, Delta> = {
+  arrowup: { dx: 0, dy: -1 },
+  arrowdown: { dx: 0, dy: 1 },
+  arrowleft: { dx: -1, dy: 0 },
+  arrowright: { dx: 1, dy: 0 },
 };
-const P1_KEYS_WASD: Record<string, DirKey> = {
-  w: "up",
-  a: "left",
-  s: "down",
-  d: "right",
-  z: "up",
-  q: "left",
+const P1_KEYS_WASD: Record<string, Delta> = {
+  // top row
+  q: { dx: -1, dy: -1 },
+  w: { dx: 0, dy: -1 },
+  e: { dx: 1, dy: -1 },
+  // middle row
+  a: { dx: -1, dy: 0 },
+  s: { dx: 0, dy: 1 },
+  d: { dx: 1, dy: 0 },
+  // bottom row — diagonal helpers
+  z: { dx: -1, dy: 1 },
+  x: { dx: 0, dy: 1 },
+  c: { dx: 1, dy: 1 },
 };
 const P2_KEYS = P1_KEYS_WASD;
-
-type Vec = { dx: -1 | 0 | 1; dy: -1 | 0 | 1 };
 
 /** Convert a normalized 2D delta inside the joystick to {-1,0,1} per axis with a small dead-zone. */
 function vectorFromDelta(nx: number, ny: number): Vec {
@@ -92,6 +102,8 @@ export function GameCanvas({
     time: 60,
   });
   const [endResult, setEndResult] = useState<null | GameResult>(null);
+  const [newAchievements, setNewAchievements] = useState<string[]>([]);
+  const [dailyJustDone, setDailyJustDone] = useState(false);
   const [isTouch, setIsTouch] = useState(false);
 
   // Detect touch device once on mount
@@ -303,6 +315,7 @@ export function GameCanvas({
         mpUnsub = gameRoom.onMessage((m: { from: string; payload: GamePayload }) => {
           if (m.payload.kind === "input") {
             const fromLower = m.from.toLowerCase();
+            if (fromLower === myLower) return;
             if (!playerToTurtle.has(fromLower) && playerToTurtle.size < 2) {
               playerToTurtle.set(fromLower, "p2");
             }
@@ -368,16 +381,24 @@ export function GameCanvas({
     }
     const inputs: Inputs = {};
     const keysDown = new Set<string>();
+    // In MP each player follows THEIR own turtle (host=p1, guest=p2).
+    const myTurtleIndex = isMultiplayer && !isHost ? 1 : 0;
     let camera = {
-      x: state.turtles[0].pos.x - viewW / 2,
-      y: state.turtles[0].pos.y - viewH / 2,
+      x: (state.turtles[myTurtleIndex] ?? state.turtles[0]).pos.x - viewW / 2,
+      y: (state.turtles[myTurtleIndex] ?? state.turtles[0]).pos.y - viewH / 2,
     };
     let stopped = false;
     let raf = 0;
 
     const isDuo = mode === "duo";
-    const p1Map = isDuo ? P1_KEYS_ARROWS : { ...P1_KEYS_ARROWS, ...P1_KEYS_WASD };
-    const p2Map = isDuo ? P2_KEYS : null;
+    // In online multiplayer each player controls only THEIR OWN turtle, so any key works.
+    // In local duo on one keyboard we split arrows (P1) vs WASD (P2).
+    const p1Map = isMultiplayer
+      ? { ...P1_KEYS_ARROWS, ...P1_KEYS_WASD }
+      : isDuo
+        ? P1_KEYS_ARROWS
+        : { ...P1_KEYS_ARROWS, ...P1_KEYS_WASD };
+    const p2Map = isDuo && !isMultiplayer ? P2_KEYS : null;
 
     const onKey = (e: KeyboardEvent, down: boolean) => {
       const k = e.key.toLowerCase();
@@ -392,18 +413,20 @@ export function GameCanvas({
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
 
-    function resolveVec(map: Record<string, DirKey>): Vec {
-      let dx: -1 | 0 | 1 = 0;
-      let dy: -1 | 0 | 1 = 0;
-      // Iterate ALL pressed keys so diagonals work (up+right, etc.)
+    function resolveVec(map: Record<string, Delta>): Vec {
+      let dx = 0;
+      let dy = 0;
+      // Iterate ALL pressed keys; deltas add up (so W+A → up-left), then clamp to -1..1.
       for (const k of keysDown) {
-        const dir = map[k];
-        if (dir === "up") dy = -1;
-        else if (dir === "down") dy = 1;
-        else if (dir === "left") dx = -1;
-        else if (dir === "right") dx = 1;
+        const v = map[k];
+        if (!v) continue;
+        dx += v.dx;
+        dy += v.dy;
       }
-      return { dx, dy };
+      return {
+        dx: dx > 0 ? 1 : dx < 0 ? -1 : 0,
+        dy: dy > 0 ? 1 : dy < 0 ? -1 : 0,
+      };
     }
 
     /** Combine keyboard + joystick inputs (joystick wins when non-zero). */
@@ -433,6 +456,7 @@ export function GameCanvas({
         if (isMultiplayer && isHost && account) {
           // Host: own input → host's turtle (p1). Apply remote inputs to mapped turtles.
           inputs.p1 = { dx: v1.dx, dy: v1.dy, action: false };
+          delete inputs.p2;
           for (const [nameLower, vec] of remoteInputs) {
             const turtleId = playerToTurtle.get(nameLower);
             if (!turtleId || turtleId === "p1") continue;
@@ -467,16 +491,20 @@ export function GameCanvas({
         state.events.length = 0;
       }
 
-      camera = lerpCameraToTurtle(camera, state.turtles[0], viewW, viewH, 0.12);
+      const myTurtle = state.turtles[myTurtleIndex] ?? state.turtles[0];
+      camera = lerpCameraToTurtle(camera, myTurtle, viewW, viewH, 0.12);
       render(ctx, state, camera, { w: viewW, h: viewH });
 
       if (state.tick % 6 === 0) {
+        // In MP each player should see THEIR own turtle's lives (life counter is
+        // personal). Scores stay split (P1/P2) so both players see both scores.
         const p1 = state.turtles[0];
         const p2 = state.turtles[1];
+        const myT = isMultiplayer && !isHost ? p2 : p1;
         setHud({
           p1Score: p1.score,
           p2Score: p2 ? p2.score : 0,
-          lives: p1.lives,
+          lives: myT ? myT.lives : 0,
           p2Lives: p2 ? p2.lives : 0,
           time: Math.ceil(state.timeLeftSec),
         });
@@ -485,12 +513,16 @@ export function GameCanvas({
       if (state.ended && state.result) {
         if (!savedRef.current) {
           savedRef.current = true;
+          let outcome: { newAchievements: string[]; dailyJustCompleted: boolean } = {
+            newAchievements: [],
+            dailyJustCompleted: false,
+          };
           if (isMultiplayer) {
             // Each player saves only their own turtle's score.
             const myTurtleId = isHost ? "p1" : "p2";
             const myTurtle = state.turtles.find((t) => t.id === myTurtleId);
             if (myTurtle) {
-              saveGameResult("duo", {
+              outcome = saveGameResult("duo", {
                 score: myTurtle.score,
                 won: myTurtle.score >= 10,
                 maxCombo: myTurtle.maxCombo,
@@ -502,8 +534,10 @@ export function GameCanvas({
               });
             }
           } else {
-            saveGameResult(mode, state.result);
+            outcome = saveGameResult(mode, state.result);
           }
+          setNewAchievements(outcome.newAchievements);
+          setDailyJustDone(outcome.dailyJustCompleted);
         }
         setEndResult(state.result);
         onEnd?.(state.result);
@@ -611,7 +645,7 @@ export function GameCanvas({
         {!isTouch && (
           <div className="absolute bottom-4 left-1/2 -translate-x-1/2 hidden sm:block">
             <span className="inline-block bg-black/40 text-white text-[11px] tracking-wide rounded-full px-4 py-1 backdrop-blur">
-              {mode === "duo" ? "🟢 ↑ ↓ ← →   ·   🟡 WASD / ZQSD" : "WASD · ZQSD · ↑ ↓ ← →"}
+              {mode === "duo" ? "🟢 ↑ ↓ ← →   ·   🟡 QWE ASD ZXC" : "QWE / ASD / ZXC · ↑ ↓ ← →"}
             </span>
           </div>
         )}
@@ -647,8 +681,9 @@ export function GameCanvas({
               />
             </div>
 
-            {/* P2 joystick — bottom-right (amber), only in duo */}
-            {mode === "duo" && (
+            {/* P2 joystick — bottom-right (amber). Hidden in online multiplayer
+                (each player controls only their own turtle via the left joystick). */}
+            {mode === "duo" && !room && (
               <div
                 ref={p2ZoneRef}
                 className="no-select absolute pointer-events-auto select-none"
@@ -687,6 +722,8 @@ export function GameCanvas({
           isMultiplayer={!!room}
           isHost={room ? !!getCurrentAccount() : true}
           onRestart={() => multiplayerRestartRef.current?.()}
+          newAchievements={newAchievements}
+          dailyJustDone={dailyJustDone}
         />
       )}
     </div>
@@ -699,29 +736,51 @@ function EndOverlay({
   isMultiplayer,
   isHost,
   onRestart,
+  newAchievements,
+  dailyJustDone,
 }: {
   result: GameResult;
   mode: Mode;
   isMultiplayer: boolean;
   isHost: boolean;
   onRestart: () => void;
+  newAchievements: string[];
+  dailyJustDone: boolean;
 }) {
   return (
-    <div className="absolute inset-0 flex items-center justify-center bg-emerald-950/80 backdrop-blur-sm animate-[fadeIn_0.3s] px-4">
-      <div className="rounded-3xl bg-white/95 p-6 sm:p-8 max-w-sm w-full text-center shadow-2xl pointer-events-auto">
-        <p className="text-5xl mb-3">
+    <div className="absolute inset-0 flex items-center justify-center bg-emerald-950/80 backdrop-blur-sm animate-[fadeIn_0.3s] px-4 overflow-y-auto py-6">
+      <div className="rounded-3xl bg-white/95 p-6 sm:p-8 max-w-md w-full text-center shadow-2xl pointer-events-auto my-auto">
+        <p className="text-5xl sm:text-6xl mb-2">
           {mode === "endless" ? "♾️" : result.won ? "🏆" : "🥬"}
         </p>
-        <h2 className="font-[var(--font-fraunces)] text-2xl sm:text-3xl font-semibold text-emerald-950 mb-2">
+        <h2 className="font-[var(--font-fraunces)] text-3xl sm:text-4xl font-semibold text-emerald-950 mb-1">
           {result.won ? "Brawo !" : "Koniec !"}
         </h2>
-        <p className="text-emerald-900/70 mb-1">
+        <p className="text-emerald-900/70 mb-4">
           {mode === "endless"
             ? `Przeżyłeś ${result.survivedSec}s`
             : `Sałaty : ${result.score}`}
         </p>
-        <p className="text-emerald-700 text-sm mb-5">+{result.score} 🥬 zapisane</p>
-        <div className="flex flex-col gap-2">
+
+        {/* Detailed round stats */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+          <StatPill emoji="🥬" label="Sałaty" value={result.score} />
+          <StatPill emoji="🔥" label="Combo max" value={result.maxCombo ?? 0} />
+          <StatPill emoji="🌟" label="Złote" value={result.goldEaten ?? 0} />
+          <StatPill emoji="🎁" label="Power-upy" value={result.powerupsPicked ?? 0} />
+        </div>
+
+        <p className="text-emerald-700 text-sm mb-1 font-medium">
+          +{result.score} 🥬 zapisane
+        </p>
+        {dailyJustDone && (
+          <p className="text-amber-700 text-sm font-medium mb-1 animate-pulse-slow">
+            🌟 Wyzwanie dnia ukończone! +100 🥬
+          </p>
+        )}
+        {newAchievements.length > 0 && <NewMedals ids={newAchievements} />}
+
+        <div className="flex flex-col gap-2 mt-5">
           {isMultiplayer ? (
             isHost ? (
               <button
@@ -750,6 +809,48 @@ function EndOverlay({
             ← Lobby
           </a>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function StatPill({ emoji, label, value }: { emoji: string; label: string; value: number }) {
+  return (
+    <div className="rounded-2xl bg-emerald-50 border border-emerald-100 px-2 py-2">
+      <div className="text-xl sm:text-2xl">{emoji}</div>
+      <div className="font-[var(--font-fraunces)] text-lg sm:text-xl font-semibold text-emerald-950 leading-none mt-0.5">
+        {value}
+      </div>
+      <div className="text-[9px] sm:text-[10px] uppercase tracking-widest text-emerald-700/65 mt-1">
+        {label}
+      </div>
+    </div>
+  );
+}
+
+function NewMedals({ ids }: { ids: string[] }) {
+  // Lazy-load achievements data — used rarely, OK to require here.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const data = require("@/data/achievements") as typeof import("@/data/achievements");
+  const medals = ids
+    .map((id) => data.ACHIEVEMENTS.find((a) => a.id === id))
+    .filter((a): a is NonNullable<typeof a> => !!a);
+  if (medals.length === 0) return null;
+  return (
+    <div className="mt-3 mb-1 rounded-2xl bg-gradient-to-br from-amber-50 to-yellow-100 border-2 border-amber-300 px-3 py-3 shadow-md animate-pulse-slow">
+      <p className="text-[10px] uppercase tracking-widest text-amber-800/80 font-medium mb-1.5">
+        🏅 Nowe odznaki ! +{medals.length * 30} 🥬
+      </p>
+      <div className="flex flex-wrap justify-center gap-2">
+        {medals.map((m) => (
+          <div
+            key={m.id}
+            className="flex items-center gap-1.5 bg-white/80 rounded-full px-3 py-1 text-xs"
+          >
+            <span className="text-base">{m.emoji}</span>
+            <span className="font-medium text-emerald-950">{m.names.pl}</span>
+          </div>
+        ))}
       </div>
     </div>
   );

@@ -124,7 +124,10 @@ export default function ShopPage() {
         </div>
 
         {RARITY_ORDER.map((rarity) => {
-          const items = TURTLES.filter((t) => t.rarity === rarity);
+          // Hide secret classes (e.g. beta_tester) until they're already owned via code.
+          const items = TURTLES.filter(
+            (t) => t.rarity === rarity && (t.id !== "beta_tester" || account.owned[t.id]),
+          );
           if (!items.length) return null;
           return (
             <section key={rarity} className="mb-10 md:mb-12">

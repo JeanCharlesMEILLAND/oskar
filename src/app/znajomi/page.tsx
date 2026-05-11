@@ -9,11 +9,12 @@ import { LanguageSwitch } from "@/components/LanguageSwitch";
 import { useT } from "@/i18n/LanguageProvider";
 import { getCurrentAccount, type Account } from "@/lib/auth";
 import {
-  acceptFriendRequest,
-  declineFriendRequest,
+  acceptFriendRequestApi,
+  declineFriendRequestApi,
+  fetchFriendGraph,
   getMessages,
-  removeFriend,
-  sendFriendRequest,
+  removeFriendApi,
+  sendFriendRequestApi,
   sendMessage,
   type Message,
 } from "@/lib/friends";
@@ -27,6 +28,9 @@ export default function FriendsPage() {
   const [tab, setTab] = useState<Tab>("list");
   const [openChatWith, setOpenChatWith] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ type: "ok" | "err"; msg: string } | null>(null);
+  // Server-backed friend graph (Neon). Falls back to account.friends/friendRequests if API offline.
+  const [serverFriends, setServerFriends] = useState<string[] | null>(null);
+  const [serverRequests, setServerRequests] = useState<string[] | null>(null);
 
   useEffect(() => {
     const a = getCurrentAccount();
@@ -36,6 +40,24 @@ export default function FriendsPage() {
     }
     setAccount(a);
   }, [router]);
+
+  // Poll the API every 2s to detect incoming friend requests in real time.
+  useEffect(() => {
+    if (!account) return;
+    let cancelled = false;
+    const load = async () => {
+      const g = await fetchFriendGraph(account.name);
+      if (cancelled || !g) return;
+      setServerFriends(g.friends);
+      setServerRequests(g.requests);
+    };
+    load();
+    const id = setInterval(load, 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [account]);
 
   if (!account) {
     return (
@@ -47,12 +69,17 @@ export default function FriendsPage() {
     );
   }
 
-  const friends = account.friends ?? [];
-  const requests = account.friendRequests ?? [];
+  // Merge server data (preferred) with local cache (fallback when API offline)
+  const friends = serverFriends ?? account.friends ?? [];
+  const requests = serverRequests ?? account.friendRequests ?? [];
 
-  const refresh = () => {
-    const fresh = getCurrentAccount();
-    if (fresh) setAccount(fresh);
+  const refresh = async () => {
+    if (!account) return;
+    const g = await fetchFriendGraph(account.name);
+    if (g) {
+      setServerFriends(g.friends);
+      setServerRequests(g.requests);
+    }
   };
 
   const flash = (msg: string, type: "ok" | "err" = "ok") => {
@@ -87,10 +114,6 @@ export default function FriendsPage() {
           </p>
         </div>
 
-        {/* Server status banner */}
-        <div className="mb-6 rounded-2xl bg-emerald-50 border border-emerald-200 px-4 py-3 text-center text-xs sm:text-sm text-emerald-900">
-          {t("friends.localOnly")}
-        </div>
 
         {/* Tabs */}
         <div className="flex p-1 bg-emerald-100/60 rounded-full mb-6 max-w-md mx-auto">
@@ -109,8 +132,8 @@ export default function FriendsPage() {
           <FriendList
             friends={friends}
             myName={account.name}
-            onRemove={(name) => {
-              removeFriend(name);
+            onRemove={async (name) => {
+              await removeFriendApi(name);
               flash(t("friends.remove"));
               refresh();
             }}
@@ -121,13 +144,13 @@ export default function FriendsPage() {
         {tab === "requests" && (
           <RequestsList
             requests={requests}
-            onAccept={(name) => {
-              acceptFriendRequest(name);
+            onAccept={async (name) => {
+              await acceptFriendRequestApi(name);
               flash(t("friends.success.accepted"));
               refresh();
             }}
-            onDecline={(name) => {
-              declineFriendRequest(name);
+            onDecline={async (name) => {
+              await declineFriendRequestApi(name);
               flash(t("friends.decline"));
               refresh();
             }}
@@ -136,24 +159,21 @@ export default function FriendsPage() {
 
         {tab === "add" && (
           <AddFriend
-            onSubmit={(name) => {
-              const r = sendFriendRequest(name);
+            onSubmit={async (name) => {
+              const r = await sendFriendRequestApi(name);
               if (r.ok) {
-                flash(t("friends.success.sent"));
+                flash(r.mutual ? t("friends.success.accepted") : t("friends.success.sent"));
                 setTab("list");
+                refresh();
               } else {
                 const msgKey =
                   r.reason === "empty"
                     ? "friends.err.empty"
-                    : r.reason === "notFound"
-                      ? "friends.err.notFound"
-                      : r.reason === "self"
-                        ? "friends.err.self"
-                        : r.reason === "alreadyFriend"
-                          ? "friends.err.alreadyFriend"
-                          : r.reason === "alreadyRequested"
-                            ? "friends.err.alreadyRequested"
-                            : "friends.err.notFound";
+                    : r.reason === "self"
+                      ? "friends.err.self"
+                      : r.reason === "alreadyFriend"
+                        ? "friends.err.alreadyFriend"
+                        : "friends.err.notFound";
                 flash(t(msgKey as never), "err");
               }
             }}

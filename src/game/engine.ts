@@ -110,6 +110,8 @@ export function createState(
   const eventState = getEventState();
   const eventDouble = eventState.active && eventState.type === "double";
   const eventRain = eventState.active && eventState.type === "rain";
+  const eventHalloween = eventState.active && eventState.type === "halloween";
+  const eventChristmas = eventState.active && eventState.type === "christmas";
 
   const state: GameState = {
     tick: 0,
@@ -128,16 +130,18 @@ export function createState(
     spawnLettuceTimer: 0,
     spawnRockTimer: 0,
     // During salad rain, spawn power-ups slightly faster too
-    spawnPowerUpTimer: eventRain ? -3 : 0,
-    // Event 2× → 10% gold lettuce chance + 2× points
-    goldLettuceChance: eventDouble ? 0.1 : 0,
-    pointsMultiplier: eventDouble ? 2 : 1,
+    spawnPowerUpTimer: eventRain || eventChristmas ? -3 : 0,
+    // Gold lettuce chance: Event 2× = 10%, Halloween = 20% (spooky golds), Christmas = 30%
+    goldLettuceChance: eventChristmas ? 0.3 : eventHalloween ? 0.2 : eventDouble ? 0.1 : 0,
+    // Points multiplier: 2× event = ×2, Halloween = ×3, Christmas = ×3
+    pointsMultiplier: eventChristmas || eventHalloween ? 3 : eventDouble ? 2 : 1,
     rng,
     mapSeed: seed,
     events: [],
   };
-  // Salad rain → start with more lettuces
-  const initialLettuceCount = eventRain ? LETTUCE_INITIAL_COUNT * 2 : LETTUCE_INITIAL_COUNT;
+  // Salad rain / Christmas → start with more lettuces
+  const initialLettuceCount =
+    eventRain || eventChristmas ? LETTUCE_INITIAL_COUNT * 2 : LETTUCE_INITIAL_COUNT;
   for (let i = 0; i < initialLettuceCount; i++) spawnLettuce(state);
   for (let i = 0; i < ROCK_INITIAL_COUNT; i++) spawnRock(state);
   return state;
@@ -323,7 +327,12 @@ function handleCollisions(state: GameState) {
       if (dist2(t.pos, l.pos) < (TURTLE_RADIUS + LETTUCE_RADIUS) ** 2) {
         const base = l.isGold ? GOLD_VALUE : 1;
         const mult = state.pointsMultiplier;
-        const classPoints = stats.points;
+        // Some classes (e.g. beta_tester) have a chance to roll a bonus point value
+        // instead of their flat points stat — gives a "lucky strike" feel.
+        let classPoints = stats.points;
+        if (stats.bonusChance && stats.bonusPoints && state.rng() < stats.bonusChance) {
+          classPoints = stats.bonusPoints;
+        }
         let comboMult = 1;
         if (t.combo + 1 >= COMBO_THRESHOLD_3X) comboMult = 3;
         else if (t.combo + 1 >= COMBO_THRESHOLD_2X) comboMult = 2;
